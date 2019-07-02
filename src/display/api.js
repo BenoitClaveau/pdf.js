@@ -28,7 +28,7 @@ import {
 } from './display_utils';
 import { FontFaceObject, FontLoader } from './font_loader';
 import { apiCompatibilityParams } from './api_compatibility';
-import { CanvasGraphics } from './canvas';
+import { CanvasFactory } from './canvas';
 import globalScope from '../shared/global_scope';
 import { GlobalWorkerOptions } from './worker_options';
 import { MessageHandler } from '../shared/message_handler';
