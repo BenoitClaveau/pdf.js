@@ -1001,7 +1001,7 @@ class PDFPageProxy {
    */
   render({ canvasContext, viewport, intent = 'display', enableWebGL = false,
            renderInteractiveForms = false, transform = null, imageLayer = null,
-           canvasFactory = null, background = null, }) {
+           canvasFactory = null, canvasGraphicsFactory = null, background = null, }) {
     const stats = this._stats;
     stats.time('Overall');
 
@@ -1011,6 +1011,7 @@ class PDFPageProxy {
 
     const renderingIntent = (intent === 'print' ? 'print' : 'display');
     const canvasFactoryInstance = canvasFactory || new DOMCanvasFactory();
+    const canvasGraphicsFactoryInstance = canvasGraphicsFactory || new CanvasFactory();
     const webGLContext = new WebGLContext({
       enable: enableWebGL,
     });
@@ -1075,6 +1076,7 @@ class PDFPageProxy {
       operatorList: intentState.operatorList,
       pageNumber: this.pageNumber,
       canvasFactory: canvasFactoryInstance,
+      canvasGraphicsFactory: canvasGraphicsFactoryInstance,
       webGLContext,
       useRequestAnimationFrame: renderingIntent !== 'print',
       pdfBug: this._pdfBug,
@@ -2463,7 +2465,7 @@ const InternalRenderTask = (function InternalRenderTaskClosure() {
 
   class InternalRenderTask {
     constructor({ callback, params, objs, commonObjs, operatorList, pageNumber,
-                  canvasFactory, webGLContext, useRequestAnimationFrame = false,
+                  canvasFactory, canvasGraphicsFactory, webGLContext, useRequestAnimationFrame = false,
                   pdfBug = false, }) {
       this.callback = callback;
       this.params = params;
@@ -2473,6 +2475,7 @@ const InternalRenderTask = (function InternalRenderTaskClosure() {
       this.operatorList = operatorList;
       this.pageNumber = pageNumber;
       this.canvasFactory = canvasFactory;
+      this.canvasGraphicsFactory = canvasGraphicsFactory;
       this.webGLContext = webGLContext;
       this._pdfBug = pdfBug;
 
@@ -2515,9 +2518,7 @@ const InternalRenderTask = (function InternalRenderTaskClosure() {
         canvasContext, viewport, transform, imageLayer, background,
       } = this.params;
 
-      this.gfx = new CanvasGraphics(canvasContext, this.commonObjs, this.objs,
-                                    this.canvasFactory, this.webGLContext,
-                                    imageLayer);
+      this.gfx = this.canvasGraphicsFactory.create(canvasContext, this.commonObjs, this.objs, this.canvasFactory, this.webGLContext, imageLayer);
       this.gfx.beginDrawing({
         transform,
         viewport,

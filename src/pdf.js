@@ -23,6 +23,7 @@ var pdfjsBuild =
 
 var pdfjsSharedUtil = require('./shared/util.js');
 var pdfjsDisplayAPI = require('./display/api.js');
+var pdfjsCanvas = require('./display/canvas.js');
 var pdfjsDisplayTextLayer = require('./display/text_layer.js');
 var pdfjsDisplayAnnotationLayer = require('./display/annotation_layer.js');
 var pdfjsDisplayDisplayUtils = require('./display/display_utils.js');
@@ -118,3 +119,4 @@ exports.PDFDateString = pdfjsDisplayDisplayUtils.PDFDateString;
 exports.GlobalWorkerOptions = pdfjsDisplayWorkerOptions.GlobalWorkerOptions;
 exports.apiCompatibilityParams =
   pdfjsDisplayAPICompatibility.apiCompatibilityParams;
+exports.CanvasGraphics = pdfjsCanvas.CanvasGraphics;

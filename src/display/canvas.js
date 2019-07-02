@@ -2275,6 +2275,15 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
   return CanvasGraphics;
 })();
 
+class CanvasFactory {
+  
+  create(canvasCtx, commonObjs, objs, canvasFactory, webGLContext, imageLayer) {
+    return new CanvasGraphics(canvasCtx, commonObjs, objs, canvasFactory, webGLContext, imageLayer);
+  }
+  
+}
+
 export {
   CanvasGraphics,
+  CanvasFactory
 };
