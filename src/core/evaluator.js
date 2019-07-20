@@ -1270,7 +1270,7 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
         transform: null,
         fontName: null,
       };
-      var SPACE_FACTOR = 0.3;
+      var SPACE_FACTOR = 0.85;
       var MULTI_SPACE_FACTOR = 1.5;
       var MULTI_SPACE_FACTOR_MAX = 4;
 
