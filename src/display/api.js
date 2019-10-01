@@ -20,7 +20,7 @@ import {
   InvalidPDFException, isArrayBuffer, isSameOrigin, MissingPDFException,
   NativeImageDecoding, PasswordException, setVerbosityLevel, shadow,
   stringToBytes, UnexpectedResponseException, UnknownErrorException,
-  unreachable, URL, warn
+  unreachable, warn
 } from '../shared/util';
 import {
   deprecated, DOMCanvasFactory, DOMCMapReaderFactory, DummyStatTimer,
@@ -29,6 +29,7 @@ import {
 } from './display_utils';
 import { FontFaceObject, FontLoader } from './font_loader';
 import { apiCompatibilityParams } from './api_compatibility';
+// import { CanvasGraphics } from './canvas'; // J'utilise CanvasFactory pour créer une isntance de CanvasGraphics. 
 import { CanvasFactory } from './canvas';
 import globalScope from '../shared/global_scope';
 import { GlobalWorkerOptions } from './worker_options';
@@ -38,6 +39,7 @@ import { PDFDataTransportStream } from './transport_stream';
 import { WebGLContext } from './webgl';
 
 const DEFAULT_RANGE_CHUNK_SIZE = 65536; // 2^16 = 65536
+const RENDERING_CANCELLED_TIMEOUT = 100; // ms
 
 let isWorkerDisabled = false;
 let fallbackWorkerSrc;
@@ -146,8 +148,6 @@ function setPDFNetworkStreamFactory(pdfNetworkStreamFactory) {
  *   2^16 = 65536.
  * @property {PDFWorker}  worker - (optional) The worker that will be used for
  *   the loading and parsing of the PDF data.
- * @property {boolean} postMessageTransfers - (optional) Enables transfer usage
- *   in postMessage for ArrayBuffers. The default value is `true`.
  * @property {number} verbosity - (optional) Controls the logging level; the
  *   constants from {VerbosityLevel} should be used.
  * @property {string} docBaseUrl - (optional) The base URL of the document,
@@ -319,7 +319,6 @@ function getDocument(src) {
 
   if (!worker) {
     const workerParams = {
-      postMessageTransfers: params.postMessageTransfers,
       verbosity: params.verbosity,
       port: GlobalWorkerOptions.workerPort,
     };
@@ -395,8 +394,8 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
   }
   return worker.messageHandler.sendWithPromise('GetDocRequest', {
     docId,
-    apiVersion: (typeof PDFJSDev !== 'undefined' ?
-                 PDFJSDev.eval('BUNDLE_VERSION') : null),
+    apiVersion: typeof PDFJSDev !== 'undefined' && !PDFJSDev.test('TESTING') ?
+                PDFJSDev.eval('BUNDLE_VERSION') : null,
     source: { // Only send the required properties, and *not* the entire object.
       data: source.data,
       url: source.url,
@@ -1006,21 +1005,26 @@ class PDFPageProxy {
     const stats = this._stats;
     stats.time('Overall');
 
+    const renderingIntent = (intent === 'print' ? 'print' : 'display');
     // If there was a pending destroy, cancel it so no cleanup happens during
     // this call to render.
     this.pendingCleanup = false;
-
-    const renderingIntent = (intent === 'print' ? 'print' : 'display');
-    const canvasFactoryInstance = canvasFactory || new DOMCanvasFactory();
-    const canvasGraphicsFactoryInstance = canvasGraphicsFactory || new CanvasFactory();
-    const webGLContext = new WebGLContext({
-      enable: enableWebGL,
-    });
 
     if (!this.intentStates[renderingIntent]) {
       this.intentStates[renderingIntent] = Object.create(null);
     }
     const intentState = this.intentStates[renderingIntent];
+
+    // Ensure that a pending `streamReader` cancel timeout is always aborted.
+    if (intentState.streamReaderCancelTimeout) {
+      clearTimeout(intentState.streamReaderCancelTimeout);
+      intentState.streamReaderCancelTimeout = null;
+    }
+
+    const canvasFactoryInstance = canvasFactory || new DOMCanvasFactory();
+	const canvasGraphicsFactoryInstance = canvasGraphicsFactory || new CanvasFactory();    const webGLContext = new WebGLContext({
+      enable: enableWebGL,
+    });
 
     // If there's no displayReadyCapability yet, then the operatorList
     // was never requested before. Make the request and create the promise.
@@ -1081,8 +1085,7 @@ class PDFPageProxy {
       operatorList: intentState.operatorList,
       pageNumber: this.pageNumber,
       canvasFactory: canvasFactoryInstance,
-      canvasGraphicsFactory: canvasGraphicsFactoryInstance,
-      webGLContext,
+	  canvasGraphicsFactory: canvasGraphicsFactoryInstance,      webGLContext,
       useRequestAnimationFrame: renderingIntent !== 'print',
       pdfBug: this._pdfBug,
     });
@@ -1250,17 +1253,17 @@ class PDFPageProxy {
    */
   _tryCleanup(resetStats = false) {
     if (!this.pendingCleanup ||
-        Object.keys(this.intentStates).some(function(intent) {
+        Object.keys(this.intentStates).some((intent) => {
           const intentState = this.intentStates[intent];
           return (intentState.renderTasks.length !== 0 ||
                   !intentState.operatorList.lastChunk);
-        }, this)) {
+        })) {
       return;
     }
 
-    Object.keys(this.intentStates).forEach(function(intent) {
+    Object.keys(this.intentStates).forEach((intent) => {
       delete this.intentStates[intent];
-    }, this);
+    });
     this.objs.clear();
     this.annotationsPromise = null;
     if (resetStats && this._stats instanceof StatTimer) {
@@ -1275,6 +1278,10 @@ class PDFPageProxy {
    */
   _startRenderPage(transparency, intent) {
     const intentState = this.intentStates[intent];
+    if (!intentState) {
+      return; // Rendering was cancelled.
+    }
+    this._stats.timeEnd('Page Request');
     // TODO Refactor RenderPageRequest to separate rendering
     // and operator list logic
     if (intentState.displayReadyCapability) {
@@ -1329,7 +1336,7 @@ class PDFPageProxy {
         if (this._transport.destroyed) {
           return; // Ignore any pending requests if the worker was terminated.
         }
-        this._renderPageChunk(value.operatorList, intentState);
+        this._renderPageChunk(value, intentState);
         pump();
       }, (reason) => {
         intentState.streamReader = null;
@@ -1370,19 +1377,41 @@ class PDFPageProxy {
     if (!intentState.streamReader) {
       return;
     }
-    if (!force && intentState.renderTasks.length !== 0) {
-      // Ensure that an Error occuring in *only* one `InternalRenderTask`, e.g.
+    if (!force) {
+      // Ensure that an Error occurring in *only* one `InternalRenderTask`, e.g.
       // multiple render() calls on the same canvas, won't break all rendering.
-      return;
-    }
-    if (reason instanceof RenderingCancelledException) {
-      // Aborting parsing on the worker-thread when rendering is cancelled will
-      // break subsequent rendering operations. TODO: Remove this restriction.
-      return;
+      if (intentState.renderTasks.length !== 0) {
+        return;
+      }
+      // Don't immediately abort parsing on the worker-thread when rendering is
+      // cancelled, since that will unnecessarily delay re-rendering when (for
+      // partially parsed pages) e.g. zooming/rotation occurs in the viewer.
+      if (reason instanceof RenderingCancelledException) {
+        intentState.streamReaderCancelTimeout = setTimeout(() => {
+          this._abortOperatorList({ intentState, reason, force: true, });
+          intentState.streamReaderCancelTimeout = null;
+        }, RENDERING_CANCELLED_TIMEOUT);
+        return;
+      }
     }
     intentState.streamReader.cancel(
       new AbortException(reason && reason.message));
     intentState.streamReader = null;
+
+    if (this._transport.destroyed) {
+      return; // Ignore any pending requests if the worker was terminated.
+    }
+    // Remove the current `intentState`, since a cancelled `getOperatorList`
+    // call on the worker-thread cannot be re-started...
+    Object.keys(this.intentStates).some((intent) => {
+      if (this.intentStates[intent] === intentState) {
+        delete this.intentStates[intent];
+        return true;
+      }
+      return false;
+    });
+    // ... and force clean-up to ensure that any old state is always removed.
+    this.cleanup();
   }
 
   /**
@@ -1435,8 +1464,14 @@ class LoopbackPort {
         while (!(desc = Object.getOwnPropertyDescriptor(p, i))) {
           p = Object.getPrototypeOf(p);
         }
-        if (typeof desc.value === 'undefined' ||
-            typeof desc.value === 'function') {
+        if (typeof desc.value === 'undefined') {
+          continue;
+        }
+        if (typeof desc.value === 'function') {
+          if (value.hasOwnProperty && value.hasOwnProperty(i)) {
+            throw new Error(
+              `LoopbackPort.postMessage - cannot clone: ${value[i]}`);
+          }
           continue;
         }
         result[i] = cloneValue(desc.value);
@@ -1445,18 +1480,18 @@ class LoopbackPort {
     }
 
     if (!this._defer) {
-      this._listeners.forEach(function(listener) {
+      this._listeners.forEach((listener) => {
         listener.call(this, { data: obj, });
-      }, this);
+      });
       return;
     }
 
     const cloned = new WeakMap();
     const e = { data: cloneValue(obj), };
     this._deferred.then(() => {
-      this._listeners.forEach(function(listener) {
+      this._listeners.forEach((listener) => {
         listener.call(this, e);
-      }, this);
+      });
     });
   }
 
@@ -1478,8 +1513,6 @@ class LoopbackPort {
  * @typedef {Object} PDFWorkerParameters
  * @property {string} name - (optional) The name of the worker.
  * @property {Object} port - (optional) The `workerPort`.
- * @property {boolean} postMessageTransfers - (optional) Enables transfer usage
- *   in postMessage for ArrayBuffers. The default value is `true`.
  * @property {number} verbosity - (optional) Controls the logging level; the
  *   constants from {VerbosityLevel} should be used.
  */
@@ -1570,7 +1603,7 @@ const PDFWorker = (function PDFWorkerClosure() {
    * @param {PDFWorkerParameters} params - The worker initialization parameters.
    */
   class PDFWorker {
-    constructor({ name = null, port = null, postMessageTransfers = true,
+    constructor({ name = null, port = null,
                   verbosity = getVerbosityLevel(), } = {}) {
       if (port && pdfWorkerPorts.has(port)) {
         throw new Error('Cannot use more than one PDFWorker per port');
@@ -1578,7 +1611,7 @@ const PDFWorker = (function PDFWorkerClosure() {
 
       this.name = name;
       this.destroyed = false;
-      this.postMessageTransfers = postMessageTransfers !== false;
+      this.postMessageTransfers = true;
       this.verbosity = verbosity;
 
       this._readyCapability = createPromiseCapability();
@@ -1667,7 +1700,7 @@ const PDFWorker = (function PDFWorkerClosure() {
               terminateEarly();
               return; // worker was destroyed
             }
-            if (data && data.supportTypedArray) {
+            if (data) { // supportTypedArray
               this._messageHandler = messageHandler;
               this._port = worker;
               this._webWorker = worker;
@@ -1707,7 +1740,7 @@ const PDFWorker = (function PDFWorkerClosure() {
             try {
               messageHandler.send('test', testObj, [testObj.buffer]);
             } catch (ex) {
-              info('Cannot use postMessage transfers');
+              warn('Cannot use postMessage transfers.');
               testObj[0] = 0;
               messageHandler.send('test', testObj);
             }
@@ -1877,7 +1910,7 @@ class WorkerTransport {
   setupMessageHandler() {
     const { messageHandler, loadingTask, } = this;
 
-    messageHandler.on('GetReader', function(data, sink) {
+    messageHandler.on('GetReader', (data, sink) => {
       assert(this._networkStream);
       this._fullReader = this._networkStream.getFullReader();
       this._fullReader.onProgress = (evt) => {
@@ -1904,9 +1937,9 @@ class WorkerTransport {
       sink.onCancel = (reason) => {
         this._fullReader.cancel(reason);
       };
-    }, this);
+    });
 
-    messageHandler.on('ReaderHeadersReady', function(data) {
+    messageHandler.on('ReaderHeadersReady', (data) => {
       const headersCapability = createPromiseCapability();
       const fullReader = this._fullReader;
       fullReader.headersReady.then(() => {
@@ -1934,9 +1967,9 @@ class WorkerTransport {
       }, headersCapability.reject);
 
       return headersCapability.promise;
-    }, this);
+    });
 
-    messageHandler.on('GetRangeReader', function(data, sink) {
+    messageHandler.on('GetRangeReader', (data, sink) => {
       assert(this._networkStream);
       const rangeReader =
         this._networkStream.getRangeReader(data.begin, data.end);
@@ -1972,14 +2005,14 @@ class WorkerTransport {
       sink.onCancel = (reason) => {
         rangeReader.cancel(reason);
       };
-    }, this);
+    });
 
-    messageHandler.on('GetDoc', function({ pdfInfo, }) {
+    messageHandler.on('GetDoc', ({ pdfInfo, }) => {
       this._numPages = pdfInfo.numPages;
       loadingTask._capability.resolve(new PDFDocumentProxy(pdfInfo, this));
-    }, this);
+    });
 
-    messageHandler.on('PasswordRequest', function(exception) {
+    messageHandler.on('PasswordRequest', (exception) => {
       this._passwordCapability = createPromiseCapability();
 
       if (loadingTask.onPassword) {
@@ -1998,34 +2031,34 @@ class WorkerTransport {
           new PasswordException(exception.message, exception.code));
       }
       return this._passwordCapability.promise;
-    }, this);
+    });
 
     messageHandler.on('PasswordException', function(exception) {
       loadingTask._capability.reject(
         new PasswordException(exception.message, exception.code));
-    }, this);
+    });
 
     messageHandler.on('InvalidPDF', function(exception) {
       loadingTask._capability.reject(
         new InvalidPDFException(exception.message));
-    }, this);
+    });
 
     messageHandler.on('MissingPDF', function(exception) {
       loadingTask._capability.reject(
         new MissingPDFException(exception.message));
-    }, this);
+    });
 
     messageHandler.on('UnexpectedResponse', function(exception) {
       loadingTask._capability.reject(
         new UnexpectedResponseException(exception.message, exception.status));
-    }, this);
+    });
 
     messageHandler.on('UnknownError', function(exception) {
       loadingTask._capability.reject(
         new UnknownErrorException(exception.message, exception.details));
-    }, this);
+    });
 
-    messageHandler.on('DataLoaded', function(data) {
+    messageHandler.on('DataLoaded', (data) => {
       // For consistency: Ensure that progress is always reported when the
       // entire PDF file has been loaded, regardless of how it was fetched.
       if (loadingTask.onProgress) {
@@ -2035,19 +2068,18 @@ class WorkerTransport {
         });
       }
       this.downloadInfoCapability.resolve(data);
-    }, this);
+    });
 
-    messageHandler.on('StartRenderPage', function(data) {
+    messageHandler.on('StartRenderPage', (data) => {
       if (this.destroyed) {
         return; // Ignore any pending requests if the worker was terminated.
       }
 
       const page = this.pageCache[data.pageIndex];
-      page._stats.timeEnd('Page Request');
       page._startRenderPage(data.transparency, data.intent);
-    }, this);
+    });
 
-    messageHandler.on('commonobj', function(data) {
+    messageHandler.on('commonobj', (data) => {
       if (this.destroyed) {
         return; // Ignore any pending requests if the worker was terminated.
       }
@@ -2102,9 +2134,9 @@ class WorkerTransport {
         default:
           throw new Error(`Got unknown common object type ${type}`);
       }
-    }, this);
+    });
 
-    messageHandler.on('obj', function(data) {
+    messageHandler.on('obj', (data) => {
       if (this.destroyed) {
         // Ignore any pending requests if the worker was terminated.
         return undefined;
@@ -2151,9 +2183,9 @@ class WorkerTransport {
           throw new Error(`Got unknown object type ${type}`);
       }
       return undefined;
-    }, this);
+    });
 
-    messageHandler.on('DocProgress', function(data) {
+    messageHandler.on('DocProgress', (data) => {
       if (this.destroyed) {
         return; // Ignore any pending requests if the worker was terminated.
       }
@@ -2164,11 +2196,12 @@ class WorkerTransport {
           total: data.total,
         });
       }
-    }, this);
+    });
 
-    messageHandler.on('UnsupportedFeature', this._onUnsupportedFeature, this);
+    messageHandler.on('UnsupportedFeature',
+                      this._onUnsupportedFeature.bind(this));
 
-    messageHandler.on('JpegDecode', function(data) {
+    messageHandler.on('JpegDecode', (data) => {
       if (this.destroyed) {
         return Promise.reject(new Error('Worker was destroyed'));
       }
@@ -2229,16 +2262,29 @@ class WorkerTransport {
         };
         img.src = imageUrl;
       });
-    }, this);
+    });
 
-    messageHandler.on('FetchBuiltInCMap', function(data) {
+    messageHandler.on('FetchBuiltInCMap', (data, sink) => {
       if (this.destroyed) {
-        return Promise.reject(new Error('Worker was destroyed'));
+        sink.error(new Error('Worker was destroyed'));
+        return;
       }
-      return this.CMapReaderFactory.fetch({
-        name: data.name,
-      });
-    }, this);
+      let fetched = false;
+
+      sink.onPull = () => {
+        if (fetched) {
+          sink.close();
+          return;
+        }
+        fetched = true;
+
+        this.CMapReaderFactory.fetch(data).then(function(builtInCMap) {
+          sink.enqueue(builtInCMap, 1, [builtInCMap.cMapData.buffer]);
+        }).catch(function(reason) {
+          sink.error(reason);
+        });
+      };
+    });
   }
 
   _onUnsupportedFeature({ featureId, }) {
@@ -2575,7 +2621,9 @@ const InternalRenderTask = (function InternalRenderTaskClosure() {
         canvasContext, viewport, transform, imageLayer, background,
       } = this.params;
 
-      this.gfx = this.canvasGraphicsFactory.create(canvasContext, this.commonObjs, this.objs, this.canvasFactory, this.webGLContext, imageLayer);
+      this.gfx = this.canvasGraphicsFactory.create(canvasContext, this.commonObjs, this.objs,
+                                    			   this.canvasFactory, this.webGLContext,
+                                    			   imageLayer);
       this.gfx.beginDrawing({
         transform,
         viewport,
