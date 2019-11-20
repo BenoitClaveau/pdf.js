@@ -74,7 +74,7 @@ var config = JSON.parse(fs.readFileSync(CONFIG_FILE).toString());
 
 // Default Autoprefixer config used for generic, components, minified-pre
 var AUTOPREFIXER_CONFIG = {
-  browsers: [
+  overrideBrowserslist: [
     'last 2 versions',
     'Chrome >= 49', // Last supported on Windows XP
     'Firefox >= 52', // Last supported on Windows XP
@@ -571,21 +571,15 @@ gulp.task('default_preferences', gulp.series('default_preferences-pre',
 
 gulp.task('locale', function () {
   var VIEWER_LOCALE_OUTPUT = 'web/locale/';
-  var METADATA_OUTPUT = 'extensions/firefox/';
-  var EXTENSION_LOCALE_OUTPUT = 'extensions/firefox/locale/';
 
   console.log();
   console.log('### Building localization files');
 
-  rimraf.sync(EXTENSION_LOCALE_OUTPUT);
-  mkdirp.sync(EXTENSION_LOCALE_OUTPUT);
   rimraf.sync(VIEWER_LOCALE_OUTPUT);
   mkdirp.sync(VIEWER_LOCALE_OUTPUT);
 
   var subfolders = fs.readdirSync(L10N_DIR);
   subfolders.sort();
-  var metadataContent = '';
-  var chromeManifestContent = '';
   var viewerOutput = '';
   var locales = [];
   for (var i = 0; i < subfolders.length; i++) {
@@ -599,34 +593,17 @@ gulp.task('locale', function () {
       continue;
     }
 
-    mkdirp.sync(EXTENSION_LOCALE_OUTPUT + '/' + locale);
     mkdirp.sync(VIEWER_LOCALE_OUTPUT + '/' + locale);
 
     locales.push(locale);
-
-    chromeManifestContent += 'locale  pdf.js  ' + locale + '  locale/' +
-                             locale + '/\n';
 
     if (checkFile(path + '/viewer.properties')) {
       viewerOutput += '[' + locale + ']\n' +
                       '@import url(' + locale + '/viewer.properties)\n\n';
     }
-
-    if (checkFile(path + '/metadata.inc')) {
-      var metadata = fs.readFileSync(path + '/metadata.inc').toString();
-      metadataContent += metadata;
-    }
   }
 
   return merge([
-    createStringSource('metadata.inc', metadataContent)
-      .pipe(gulp.dest(METADATA_OUTPUT)),
-    createStringSource('chrome.manifest.inc', chromeManifestContent)
-      .pipe(gulp.dest(METADATA_OUTPUT)),
-    gulp.src(L10N_DIR + '/{' + locales.join(',') + '}' +
-             '/{viewer,chrome}.properties', { base: L10N_DIR, })
-      .pipe(gulp.dest(EXTENSION_LOCALE_OUTPUT)),
-
     createStringSource('locale.properties', viewerOutput)
       .pipe(gulp.dest(VIEWER_LOCALE_OUTPUT)),
     gulp.src(L10N_DIR + '/{' + locales.join(',') + '}' +
@@ -717,7 +694,9 @@ gulp.task('generic', gulp.series('buildnumber', 'default_preferences', 'locale',
     preprocessHTML('web/viewer.html', defines)
         .pipe(gulp.dest(GENERIC_DIR + 'web')),
     preprocessCSS('web/viewer.css', 'generic', defines, true)
-        .pipe(postcss([autoprefixer(AUTOPREFIXER_CONFIG)]))
+        .pipe(postcss([
+          autoprefixer(AUTOPREFIXER_CONFIG)
+        ]))
         .pipe(gulp.dest(GENERIC_DIR + 'web')),
 
     gulp.src('web/compressed.tracemonkey-pldi-09.pdf')
@@ -743,7 +722,9 @@ gulp.task('components', gulp.series('buildnumber', function () {
     createComponentsBundle(defines).pipe(gulp.dest(COMPONENTS_DIR)),
     gulp.src(COMPONENTS_IMAGES).pipe(gulp.dest(COMPONENTS_DIR + 'images')),
     preprocessCSS('web/pdf_viewer.css', 'components', defines, true)
-        .pipe(postcss([autoprefixer(AUTOPREFIXER_CONFIG)]))
+        .pipe(postcss([
+          autoprefixer(AUTOPREFIXER_CONFIG)
+        ]))
         .pipe(gulp.dest(COMPONENTS_DIR)),
   ]);
 }));
@@ -783,7 +764,9 @@ gulp.task('minified-pre', gulp.series('buildnumber', 'default_preferences',
     preprocessHTML('web/viewer.html', defines)
         .pipe(gulp.dest(MINIFIED_DIR + 'web')),
     preprocessCSS('web/viewer.css', 'minified', defines, true)
-        .pipe(postcss([autoprefixer(AUTOPREFIXER_CONFIG)]))
+        .pipe(postcss([
+          autoprefixer(AUTOPREFIXER_CONFIG)
+        ]))
         .pipe(gulp.dest(MINIFIED_DIR + 'web')),
 
     gulp.src('web/compressed.tracemonkey-pldi-09.pdf')
@@ -854,7 +837,7 @@ function preprocessDefaultPreferences(content) {
 }
 
 gulp.task('mozcentral-pre', gulp.series('buildnumber', 'default_preferences',
-                                        'locale', function() {
+                                        function() {
   console.log();
   console.log('### Building mozilla-central extension');
   var defines = builder.merge(DEFINES, { MOZCENTRAL: true, SKIP_BABEL: true, });
@@ -885,11 +868,11 @@ gulp.task('mozcentral-pre', gulp.series('buildnumber', 'default_preferences',
         .pipe(gulp.dest(MOZCENTRAL_CONTENT_DIR + 'web')),
     preprocessCSS('web/viewer.css', 'mozcentral', defines, true)
         .pipe(postcss([
-            autoprefixer({ browsers: ['last 1 firefox versions'], })
+          autoprefixer({ overrideBrowserslist: ['last 1 firefox versions'], })
         ]))
         .pipe(gulp.dest(MOZCENTRAL_CONTENT_DIR + 'web')),
 
-    gulp.src(FIREFOX_EXTENSION_DIR + 'locale/en-US/*.properties')
+    gulp.src('l10n/en-US/*.properties')
         .pipe(gulp.dest(MOZCENTRAL_L10N_DIR)),
     gulp.src(FIREFOX_EXTENSION_DIR + 'README.mozilla')
         .pipe(replace(/\bPDFJSSCRIPT_VERSION\b/g, version))
@@ -935,7 +918,9 @@ gulp.task('chromium-pre', gulp.series('buildnumber', 'default_preferences',
     preprocessHTML('web/viewer.html', defines)
         .pipe(gulp.dest(CHROME_BUILD_CONTENT_DIR + 'web')),
     preprocessCSS('web/viewer.css', 'chrome', defines, true)
-        .pipe(postcss([autoprefixer({ browsers: ['chrome >= 49'], })]))
+        .pipe(postcss([
+          autoprefixer({ overrideBrowserslist: ['chrome >= 49'], })
+        ]))
         .pipe(gulp.dest(CHROME_BUILD_CONTENT_DIR + 'web')),
 
     gulp.src('LICENSE').pipe(gulp.dest(CHROME_BUILD_DIR)),
@@ -959,7 +944,6 @@ gulp.task('jsdoc', function (done) {
   var JSDOC_FILES = [
     'src/doc_helper.js',
     'src/display/api.js',
-    'src/shared/util.js',
   ];
 
   rimraf(JSDOC_BUILD_DIR, function () {
@@ -1336,6 +1320,7 @@ gulp.task('dist-pre', gulp.series('generic', 'components', 'image_decoders',
       'http': false,
       'https': false,
       'node-ensure': false,
+      'url': false,
       'zlib': false,
     },
     format: 'amd', // to not allow system.js to choose 'cjs'

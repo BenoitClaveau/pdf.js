@@ -60,7 +60,10 @@
     "valid-typeof": ["error", { "requireStringLiterals": true, }],
 
     // Best Practices
-    "accessor-pairs": ["error", { "setWithoutGet": true, }],
+    "accessor-pairs": ["error", {
+      "setWithoutGet": true,
+      "enforceForClassMembers": true,
+    }],
     "consistent-return": "error",
     "curly": ["error", "all"],
     "eqeqeq": ["error", "always"],
@@ -195,6 +198,7 @@
     "object-shorthand": ["error", "always", {
       "avoidQuotes": true,
     }],
+    "prefer-const": "off",
     "rest-spread-spacing": ["error", "never"],
     "sort-imports": ["error", {
       "ignoreCase": true,
