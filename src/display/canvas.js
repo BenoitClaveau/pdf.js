@@ -2283,7 +2283,8 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
   return CanvasGraphics;
 })();
 
-class CanvasFactory {
+// PATCH
+class CanvasGraphicsFactory {
   
   create(canvasCtx, commonObjs, objs, canvasFactory, webGLContext, imageLayer) {
     return new CanvasGraphics(canvasCtx, commonObjs, objs, canvasFactory, webGLContext, imageLayer);
@@ -2291,7 +2292,8 @@ class CanvasFactory {
   
 }
 
+// PATCH
 export {
   CanvasGraphics,
-  CanvasFactory
+  CanvasGraphicsFactory
 };

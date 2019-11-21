@@ -32,7 +32,8 @@ import {
 } from './display_utils';
 import { FontFaceObject, FontLoader } from './font_loader';
 import { apiCompatibilityParams } from './api_compatibility';
-import { CanvasGraphics } from './canvas';
+// PATCH
+import { CanvasGraphicsFactory } from './canvas';
 import { globalScope } from '../shared/global_scope';
 import { GlobalWorkerOptions } from './worker_options';
 import { MessageHandler } from '../shared/message_handler';
@@ -999,6 +1000,7 @@ class PDFPageProxy {
    * @returns {RenderTask} An object that contains the promise, which
    *                       is resolved when the page finishes rendering.
    */
+  // PATCH
   render({ canvasContext, viewport, intent = 'display', enableWebGL = false,
            renderInteractiveForms = false, transform = null, imageLayer = null,
            canvasFactory = null, canvasGraphicsFactory = null, background = null, }) {
@@ -1022,8 +1024,10 @@ class PDFPageProxy {
       intentState.streamReaderCancelTimeout = null;
     }
 
+    // PATCH
     const canvasFactoryInstance = canvasFactory || new DOMCanvasFactory();
-	const canvasGraphicsFactoryInstance = canvasGraphicsFactory || new CanvasFactory();    const webGLContext = new WebGLContext({
+    const canvasGraphicsFactoryInstance = canvasGraphicsFactory || new CanvasGraphicsFactory();    
+    const webGLContext = new WebGLContext({
       enable: enableWebGL,
     });
 
@@ -1090,7 +1094,8 @@ class PDFPageProxy {
       operatorList: intentState.operatorList,
       pageNumber: this.pageNumber,
       canvasFactory: canvasFactoryInstance,
-	  canvasGraphicsFactory: canvasGraphicsFactoryInstance,      webGLContext,
+      canvasGraphicsFactory: canvasGraphicsFactoryInstance,      
+      webGLContext,
       useRequestAnimationFrame: renderingIntent !== 'print',
       pdfBug: this._pdfBug,
     });
