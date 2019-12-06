@@ -1636,8 +1636,11 @@ var XRef = (function XRefClosure() {
       }
       const num = ref.num;
 
-      if (this._cacheMap.has(num)) {
-        const cacheEntry = this._cacheMap.get(num);
+      // The XRef cache is populated with objects which are obtained through
+      // `Parser.getObj`, and indirectly via `Lexer.getObj`. Neither of these
+      // methods should ever return `undefined` (note the `assert` calls below).
+      const cacheEntry = this._cacheMap.get(num);
+      if (cacheEntry !== undefined) {
         // In documents with Object Streams, it's possible that cached `Dict`s
         // have not been assigned an `objId` yet (see e.g. issue3115r.pdf).
         if (cacheEntry instanceof Dict && !cacheEntry.objId) {
@@ -1682,12 +1685,6 @@ var XRef = (function XRefClosure() {
       var obj2 = parser.getObj();
       var obj3 = parser.getObj();
 
-      if (!Number.isInteger(obj1)) {
-        obj1 = parseInt(obj1, 10);
-      }
-      if (!Number.isInteger(obj2)) {
-        obj2 = parseInt(obj2, 10);
-      }
       if (obj1 !== num || obj2 !== gen || !(obj3 instanceof Cmd)) {
         throw new XRefEntryException(`Bad (uncompressed) XRef entry: ${ref}`);
       }
@@ -1707,19 +1704,24 @@ var XRef = (function XRefClosure() {
         xrefEntry = parser.getObj();
       }
       if (!isStream(xrefEntry)) {
+        if (typeof PDFJSDev === 'undefined' ||
+            PDFJSDev.test('!PRODUCTION || TESTING')) {
+          assert(xrefEntry !== undefined,
+                 'fetchUncompressed: The "xrefEntry" cannot be undefined.');
+        }
         this._cacheMap.set(num, xrefEntry);
       }
       return xrefEntry;
     },
 
     fetchCompressed(ref, xrefEntry, suppressEncryption = false) {
-      var tableOffset = xrefEntry.offset;
-      var stream = this.fetch(Ref.get(tableOffset, 0));
+      const tableOffset = xrefEntry.offset;
+      const stream = this.fetch(Ref.get(tableOffset, 0));
       if (!isStream(stream)) {
         throw new FormatError('bad ObjStm stream');
       }
-      var first = stream.dict.get('First');
-      var n = stream.dict.get('N');
+      const first = stream.dict.get('First');
+      const n = stream.dict.get('N');
       if (!Number.isInteger(first) || !Number.isInteger(n)) {
         throw new FormatError(
           'invalid first and n parameters for ObjStm stream');
@@ -1729,33 +1731,42 @@ var XRef = (function XRefClosure() {
         xref: this,
         allowStreams: true,
       });
-      var i, entries = [], num, nums = [];
+      const nums = new Array(n);
       // read the object numbers to populate cache
-      for (i = 0; i < n; ++i) {
-        num = parser.getObj();
+      for (let i = 0; i < n; ++i) {
+        const num = parser.getObj();
         if (!Number.isInteger(num)) {
           throw new FormatError(
             `invalid object number in the ObjStm stream: ${num}`);
         }
-        nums.push(num);
-        var offset = parser.getObj();
+        const offset = parser.getObj();
         if (!Number.isInteger(offset)) {
           throw new FormatError(
             `invalid object offset in the ObjStm stream: ${offset}`);
         }
+        nums[i] = num;
       }
+      const entries = new Array(n);
       // read stream objects for cache
-      for (i = 0; i < n; ++i) {
-        entries.push(parser.getObj());
+      for (let i = 0; i < n; ++i) {
+        const obj = parser.getObj();
+        entries[i] = obj;
         // The ObjStm should not contain 'endobj'. If it's present, skip over it
         // to support corrupt PDFs (fixes issue 5241, bug 898610, bug 1037816).
-        if (isCmd(parser.buf1, 'endobj')) {
+        if ((parser.buf1 instanceof Cmd) && parser.buf1.cmd === 'endobj') {
           parser.shift();
         }
-        num = nums[i];
-        var entry = this.entries[num];
+        if (isStream(obj)) {
+          continue;
+        }
+        const num = nums[i], entry = this.entries[num];
         if (entry && entry.offset === tableOffset && entry.gen === i) {
-          this._cacheMap.set(num, entries[i]);
+          if (typeof PDFJSDev === 'undefined' ||
+              PDFJSDev.test('!PRODUCTION || TESTING')) {
+            assert(obj !== undefined,
+                   'fetchCompressed: The "obj" cannot be undefined.');
+          }
+          this._cacheMap.set(num, obj);
         }
       }
       xrefEntry = entries[xrefEntry.gen];
