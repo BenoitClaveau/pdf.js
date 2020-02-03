@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { normalizeWheelEventDelta } from "./ui_utils";
+import { normalizeWheelEventDelta } from "./ui_utils.js";
 
 const DELAY_BEFORE_RESETTING_SWITCH_IN_PROGRESS = 1500; // in ms
 const DELAY_BEFORE_HIDING_CONTROLS = 3000; // in ms
@@ -471,10 +471,7 @@ class PDFPresentationMode {
 
     window.addEventListener("fullscreenchange", this.fullscreenChangeBind);
     window.addEventListener("mozfullscreenchange", this.fullscreenChangeBind);
-    if (
-      typeof PDFJSDev === "undefined" ||
-      !PDFJSDev.test("FIREFOX || MOZCENTRAL")
-    ) {
+    if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
       window.addEventListener(
         "webkitfullscreenchange",
         this.fullscreenChangeBind
@@ -492,10 +489,7 @@ class PDFPresentationMode {
       "mozfullscreenchange",
       this.fullscreenChangeBind
     );
-    if (
-      typeof PDFJSDev === "undefined" ||
-      !PDFJSDev.test("FIREFOX || MOZCENTRAL")
-    ) {
+    if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
       window.removeEventListener(
         "webkitfullscreenchange",
         this.fullscreenChangeBind

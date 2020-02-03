@@ -29,13 +29,13 @@ import {
   UNSUPPORTED_FEATURES,
   VerbosityLevel,
   warn,
-} from "../shared/util";
-import { clearPrimitiveCaches, Ref } from "./primitives";
-import { LocalPdfManager, NetworkPdfManager } from "./pdf_manager";
-import { isNodeJS } from "../shared/is_node";
-import { MessageHandler } from "../shared/message_handler";
-import { PDFWorkerStream } from "./worker_stream";
-import { XRefParseException } from "./core_utils";
+} from "../shared/util.js";
+import { clearPrimitiveCaches, Ref } from "./primitives.js";
+import { LocalPdfManager, NetworkPdfManager } from "./pdf_manager.js";
+import { isNodeJS } from "../shared/is_node.js";
+import { MessageHandler } from "../shared/message_handler.js";
+import { PDFWorkerStream } from "./worker_stream.js";
+import { XRefParseException } from "./core_utils.js";
 
 var WorkerTask = (function WorkerTaskClosure() {
   function WorkerTask(name) {
@@ -593,16 +593,22 @@ var WorkerMessageHandler = {
 
     handler.on("Terminate", function wphTerminate(data) {
       terminated = true;
+
+      const waitOn = [];
       if (pdfManager) {
         pdfManager.terminate(new AbortException("Worker was terminated."));
+
+        const cleanupPromise = pdfManager.cleanup();
+        waitOn.push(cleanupPromise);
+
         pdfManager = null;
+      } else {
+        clearPrimitiveCaches();
       }
       if (cancelXHRs) {
         cancelXHRs(new AbortException("Worker was terminated."));
       }
-      clearPrimitiveCaches();
 
-      var waitOn = [];
       WorkerTasks.forEach(function(task) {
         waitOn.push(task.finished);
         task.terminate();

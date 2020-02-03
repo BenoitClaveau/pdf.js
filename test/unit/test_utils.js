@@ -13,10 +13,10 @@
  * limitations under the License.
  */
 
-import { assert, CMapCompressionType } from "../../src/shared/util";
-import { isNodeJS } from "../../src/shared/is_node";
-import { isRef } from "../../src/core/primitives";
-import { Page } from "../../src/core/document";
+import { assert, CMapCompressionType } from "../../src/shared/util.js";
+import { isNodeJS } from "../../src/shared/is_node.js";
+import { isRef } from "../../src/core/primitives.js";
+import { Page } from "../../src/core/document.js";
 
 class DOMFileReaderFactory {
   static async fetch(params) {
@@ -50,13 +50,13 @@ const TEST_PDFS_PATH = {
 };
 
 function buildGetDocumentParams(filename, options) {
-  let params = Object.create(null);
+  const params = Object.create(null);
   if (isNodeJS) {
     params.url = TEST_PDFS_PATH.node + filename;
   } else {
     params.url = new URL(TEST_PDFS_PATH.dom + filename, window.location).href;
   }
-  for (let option in options) {
+  for (const option in options) {
     params[option] = options[option];
   }
   return params;
@@ -137,8 +137,8 @@ class XRefMock {
   constructor(array) {
     this._map = Object.create(null);
 
-    for (let key in array) {
-      let obj = array[key];
+    for (const key in array) {
+      const obj = array[key];
       this._map[obj.ref.toString()] = obj.data;
     }
   }

@@ -19,11 +19,11 @@ import {
   isString,
   unreachable,
   warn,
-} from "../shared/util";
-import { isCmd, isEOF, isName, isStream } from "./primitives";
-import { Lexer } from "./parser";
-import { MissingDataException } from "./core_utils";
-import { Stream } from "./stream";
+} from "../shared/util.js";
+import { isCmd, isEOF, isName, isStream } from "./primitives.js";
+import { Lexer } from "./parser.js";
+import { MissingDataException } from "./core_utils.js";
+import { Stream } from "./stream.js";
 
 var BUILT_IN_CMAPS = [
   // << Start unicode maps.
@@ -240,8 +240,8 @@ class CMap {
   }
 
   mapBfRangeToArray(low, high, array) {
-    let i = 0,
-      ii = array.length;
+    const ii = array.length;
+    let i = 0;
     while (low <= high && i < ii) {
       this._map[low] = array[i++];
       ++low;
@@ -267,8 +267,8 @@ class CMap {
     // indices in the *billions*. For such tables we use for..in, which isn't
     // ideal because it stringifies the indices for all present elements, but
     // it does avoid iterating over every undefined entry.
-    let map = this._map;
-    let length = map.length;
+    const map = this._map;
+    const length = map.length;
     if (length <= 0x10000) {
       for (let i = 0; i < length; i++) {
         if (map[i] !== undefined) {
@@ -276,7 +276,7 @@ class CMap {
         }
       }
     } else {
-      for (let i in map) {
+      for (const i in map) {
         callback(i, map[i]);
       }
     }
@@ -289,7 +289,7 @@ class CMap {
     if (map.length <= 0x10000) {
       return map.indexOf(value);
     }
-    for (let charCode in map) {
+    for (const charCode in map) {
       if (map[charCode] === value) {
         return charCode | 0;
       }

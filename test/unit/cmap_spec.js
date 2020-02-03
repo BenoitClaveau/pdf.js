@@ -13,12 +13,12 @@
  * limitations under the License.
  */
 
-import { CMap, CMapFactory, IdentityCMap } from "../../src/core/cmap";
-import { DOMCMapReaderFactory } from "../../src/display/display_utils";
-import { isNodeJS } from "../../src/shared/is_node";
-import { Name } from "../../src/core/primitives";
-import { NodeCMapReaderFactory } from "./test_utils";
-import { StringStream } from "../../src/core/stream";
+import { CMap, CMapFactory, IdentityCMap } from "../../src/core/cmap.js";
+import { DOMCMapReaderFactory } from "../../src/display/display_utils.js";
+import { isNodeJS } from "../../src/shared/is_node.js";
+import { Name } from "../../src/core/primitives.js";
+import { NodeCMapReaderFactory } from "./test_utils.js";
+import { StringStream } from "../../src/core/stream.js";
 
 var cMapUrl = {
   dom: "../../external/bcmaps/",
@@ -345,7 +345,7 @@ describe("cmap", function() {
       });
     }
 
-    let cmapPromise = CMapFactory.create({
+    const cmapPromise = CMapFactory.create({
       encoding: Name.get("Adobe-Japan1-1"),
       fetchBuiltInCMap: tmpFetchBuiltInCMap,
       useCMap: null,
@@ -356,7 +356,7 @@ describe("cmap", function() {
       },
       function(reason) {
         expect(reason instanceof Error).toEqual(true);
-        let message = reason.message;
+        const message = reason.message;
         expect(message.startsWith("Unable to load CMap at: ")).toEqual(true);
         expect(message.endsWith("/external/bcmaps/Adobe-Japan1-1")).toEqual(
           true

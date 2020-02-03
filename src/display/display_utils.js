@@ -23,7 +23,7 @@ import {
   stringToBytes,
   Util,
   warn,
-} from "../shared/util";
+} from "../shared/util.js";
 
 const DEFAULT_LINK_REL = "noopener noreferrer nofollow";
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -461,8 +461,8 @@ class StatTimer {
 
   toString() {
     // Find the longest name for padding purposes.
-    let outBuf = [],
-      longest = 0;
+    const outBuf = [];
+    let longest = 0;
     for (const time of this.times) {
       const name = time.name;
       if (name.length > longest) {

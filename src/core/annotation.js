@@ -27,13 +27,13 @@ import {
   stringToPDFString,
   Util,
   warn,
-} from "../shared/util";
-import { Catalog, FileSpec, ObjectLoader } from "./obj";
-import { Dict, isDict, isName, isRef, isStream } from "./primitives";
-import { ColorSpace } from "./colorspace";
-import { getInheritableProperty } from "./core_utils";
-import { OperatorList } from "./operator_list";
-import { Stream } from "./stream";
+} from "../shared/util.js";
+import { Catalog, FileSpec, ObjectLoader } from "./obj.js";
+import { Dict, isDict, isName, isRef, isStream } from "./primitives.js";
+import { ColorSpace } from "./colorspace.js";
+import { getInheritableProperty } from "./core_utils.js";
+import { OperatorList } from "./operator_list.js";
+import { Stream } from "./stream.js";
 
 class AnnotationFactory {
   /**
@@ -1058,8 +1058,8 @@ class ChoiceWidgetAnnotation extends WidgetAnnotation {
     if (Array.isArray(options)) {
       const xref = params.xref;
       for (let i = 0, ii = options.length; i < ii; i++) {
-        let option = xref.fetchIfRef(options[i]);
-        let isOptionArray = Array.isArray(option);
+        const option = xref.fetchIfRef(options[i]);
+        const isOptionArray = Array.isArray(option);
 
         this.data.options[i] = {
           exportValue: isOptionArray ? xref.fetchIfRef(option[0]) : option,

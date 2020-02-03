@@ -14,8 +14,8 @@
  */
 /* eslint no-var: error */
 
-import { AbortException } from "../../src/shared/util";
-import { PDFFetchStream } from "../../src/display/fetch_stream";
+import { AbortException } from "../../src/shared/util.js";
+import { PDFFetchStream } from "../../src/display/fetch_stream.js";
 
 describe("fetch_stream", function() {
   const pdfUrl = new URL("../pdfs/tracemonkey.pdf", window.location).href;
@@ -86,7 +86,7 @@ describe("fetch_stream", function() {
     );
     const rangeReader2 = stream.getRangeReader(pdfLength - tailSize, pdfLength);
 
-    let result1 = { value: 0 },
+    const result1 = { value: 0 },
       result2 = { value: 0 };
     const read = function(reader, lenResult) {
       return reader.read().then(function(result) {

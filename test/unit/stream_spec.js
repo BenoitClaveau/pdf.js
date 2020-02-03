@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-import { PredictorStream, Stream } from "../../src/core/stream";
-import { Dict } from "../../src/core/primitives";
+import { PredictorStream, Stream } from "../../src/core/stream.js";
+import { Dict } from "../../src/core/primitives.js";
 
 describe("stream", function() {
   beforeEach(function() {
@@ -69,7 +69,7 @@ describe("stream", function() {
       );
 
       predictor.reset();
-      let clampedResult = predictor.getBytes(6, /* forceClamped = */ true);
+      const clampedResult = predictor.getBytes(6, /* forceClamped = */ true);
       expect(clampedResult).toEqual(
         new Uint8ClampedArray([100, 3, 101, 2, 102, 1])
       );

@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-import { Dict, isDict } from "./primitives";
-import { CCITTFaxDecoder } from "./ccitt";
-import { DecodeStream } from "./stream";
+import { Dict, isDict } from "./primitives.js";
+import { CCITTFaxDecoder } from "./ccitt.js";
+import { DecodeStream } from "./stream.js";
 
 var CCITTFaxStream = (function CCITTFaxStreamClosure() {
   function CCITTFaxStream(str, maybeLength, params) {
@@ -48,7 +48,7 @@ var CCITTFaxStream = (function CCITTFaxStreamClosure() {
 
   CCITTFaxStream.prototype.readBlock = function() {
     while (!this.eof) {
-      let c = this.ccittFaxDecoder.readNextChar();
+      const c = this.ccittFaxDecoder.readNextChar();
       if (c === -1) {
         this.eof = true;
         return;

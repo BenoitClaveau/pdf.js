@@ -37,7 +37,7 @@ import {
   UnknownErrorException,
   unreachable,
   warn,
-} from "../shared/util";
+} from "../shared/util.js";
 import {
   deprecated,
   DOMCanvasFactory,
@@ -47,17 +47,17 @@ import {
   releaseImageResources,
   RenderingCancelledException,
   StatTimer,
-} from "./display_utils";
-import { FontFaceObject, FontLoader } from "./font_loader";
-import { apiCompatibilityParams } from "./api_compatibility";
-import { CanvasGraphics } from "./canvas";
-import { CanvasGraphicsFactory } from './canvas';
-import { GlobalWorkerOptions } from "./worker_options";
-import { isNodeJS } from "../shared/is_node";
-import { MessageHandler } from "../shared/message_handler";
-import { Metadata } from "./metadata";
-import { PDFDataTransportStream } from "./transport_stream";
-import { WebGLContext } from "./webgl";
+} from "./display_utils.js";
+import { FontFaceObject, FontLoader } from "./font_loader.js";
+import { apiCompatibilityParams } from "./api_compatibility.js";
+import { CanvasGraphics } from "./canvas.js";
+import { CanvasGraphicsFactory } from './canvas.js';
+import { GlobalWorkerOptions } from "./worker_options.js";
+import { isNodeJS } from "../shared/is_node.js";
+import { MessageHandler } from "../shared/message_handler.js";
+import { Metadata } from "./metadata.js";
+import { PDFDataTransportStream } from "./transport_stream.js";
+import { WebGLContext } from "./webgl.js";
 
 const DEFAULT_RANGE_CHUNK_SIZE = 65536; // 2^16 = 65536
 const RENDERING_CANCELLED_TIMEOUT = 100; // ms
@@ -1640,11 +1640,10 @@ const PDFWorker = (function PDFWorkerClosure() {
         if (typeof SystemJS !== "object") {
           throw new Error("SystemJS must be used to load fake worker.");
         }
-        const worker = await SystemJS.import("pdfjs/core/worker");
+        const worker = await SystemJS.import("pdfjs/core/worker.js");
         return worker.WorkerMessageHandler;
       }
       if (
-        typeof PDFJSDev !== "undefined" &&
         PDFJSDev.test("GENERIC") &&
         isNodeJS &&
         // eslint-disable-next-line no-undef
@@ -1834,7 +1833,9 @@ const PDFWorker = (function PDFWorkerClosure() {
           });
 
           const sendTest = () => {
-            let testObj = new Uint8Array([this.postMessageTransfers ? 255 : 0]);
+            const testObj = new Uint8Array([
+              this.postMessageTransfers ? 255 : 0,
+            ]);
             // Some versions of Opera throw a DATA_CLONE_ERR on serializing the
             // typed array. Also, checking if we can use transfers.
             try {
@@ -1887,6 +1888,10 @@ const PDFWorker = (function PDFWorkerClosure() {
           const messageHandler = new MessageHandler(id, id + "_worker", port);
           this._messageHandler = messageHandler;
           this._readyCapability.resolve();
+          // Send global setting, e.g. verbosity level.
+          messageHandler.send("configure", {
+            verbosity: this.verbosity,
+          });
         })
         .catch(reason => {
           this._readyCapability.reject(

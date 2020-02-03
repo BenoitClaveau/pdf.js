@@ -88,7 +88,6 @@ var DEFINES = {
   TESTING: false,
   // The main build targets:
   GENERIC: false,
-  FIREFOX: false,
   MOZCENTRAL: false,
   CHROME: false,
   MINIFIED: false,
@@ -173,7 +172,6 @@ function createWebpackConfig(defines, output) {
     .readFileSync("./src/license_header_libre.js")
     .toString();
   var enableSourceMaps =
-    !bundleDefines.FIREFOX &&
     !bundleDefines.MOZCENTRAL &&
     !bundleDefines.CHROME &&
     !bundleDefines.TESTING;
@@ -1548,12 +1546,6 @@ gulp.task(
         homepage: DIST_HOMEPAGE,
         bugs: DIST_BUGS_URL,
         license: DIST_LICENSE,
-        dependencies: {
-          "worker-loader": "^2.0.0", // used in external/dist/webpack.json
-        },
-        peerDependencies: {
-          webpack: "^3.0.0 || ^4.0.0-alpha.0 || ^4.0.0", // from 'worker-loader'
-        },
         browser: {
           fs: false,
           http: false,

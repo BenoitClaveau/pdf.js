@@ -19,8 +19,8 @@ import {
   arraysToBytes,
   createPromiseCapability,
   isEmptyObj,
-} from "../shared/util";
-import { MissingDataException } from "./core_utils";
+} from "../shared/util.js";
+import { MissingDataException } from "./core_utils.js";
 
 class ChunkedStream {
   constructor(length, chunkSize, manager) {
@@ -496,7 +496,7 @@ class ChunkedStreamManager {
   }
 
   onReceiveData(args) {
-    let chunk = args.chunk;
+    const chunk = args.chunk;
     const isProgressive = args.begin === undefined;
     const begin = isProgressive ? this.progressiveDataLength : args.begin;
     const end = begin + chunk.byteLength;
