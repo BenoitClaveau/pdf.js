@@ -113,9 +113,9 @@ class BaseFontLoader {
     unreachable("Abstract method `_queueLoadingCallback`.");
   }
 
-  // eslint-disable-next-line getter-return
   get isFontLoadingAPISupported() {
-    unreachable("Abstract method `isFontLoadingAPISupported`.");
+    const supported = typeof document !== "undefined" && !!document.fonts;
+    return shadow(this, "isFontLoadingAPISupported", supported);
   }
 
   // eslint-disable-next-line getter-return
@@ -136,14 +136,6 @@ class BaseFontLoader {
 let FontLoader;
 if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
   FontLoader = class MozcentralFontLoader extends BaseFontLoader {
-    get isFontLoadingAPISupported() {
-      return shadow(
-        this,
-        "isFontLoadingAPISupported",
-        typeof document !== "undefined" && !!document.fonts
-      );
-    }
-
     get isSyncFontLoadingSupported() {
       return shadow(this, "isSyncFontLoadingSupported", true);
     }
@@ -159,24 +151,6 @@ if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
         nextRequestId: 0,
       };
       this.loadTestFontId = 0;
-    }
-
-    get isFontLoadingAPISupported() {
-      let supported = typeof document !== "undefined" && !!document.fonts;
-
-      if (
-        (typeof PDFJSDev === "undefined" || !PDFJSDev.test("CHROME")) &&
-        supported &&
-        typeof navigator !== "undefined"
-      ) {
-        // The Firefox Font Loading API does not work with `mozPrintCallback`
-        // prior to version 63; see https://bugzilla.mozilla.org/show_bug.cgi?id=1473742
-        const m = /Mozilla\/5.0.*?rv:(\d+).*? Gecko/.exec(navigator.userAgent);
-        if (m && m[1] < 63) {
-          supported = false;
-        }
-      }
-      return shadow(this, "isFontLoadingAPISupported", supported);
     }
 
     get isSyncFontLoadingSupported() {
@@ -341,12 +315,11 @@ if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
       names.push(loadTestFontId);
 
       const div = document.createElement("div");
-      div.setAttribute(
-        "style",
-        "visibility: hidden;" +
-          "width: 10px; height: 10px;" +
-          "position: absolute; top: 0px; left: 0px;"
-      );
+      div.style.visibility = "hidden";
+      div.style.width = div.style.height = "10px";
+      div.style.position = "absolute";
+      div.style.top = div.style.left = "0px";
+
       for (i = 0, ii = names.length; i < ii; ++i) {
         const span = document.createElement("span");
         span.textContent = "Hi";
