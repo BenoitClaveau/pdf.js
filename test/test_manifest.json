@@ -3064,6 +3064,15 @@
        "link": false,
        "type": "eq"
     },
+    {  "id": "issue11678",
+       "file": "pdfs/issue11678.pdf",
+       "md5": "e2efadeb91932f4c21e4fc682cce7de9",
+       "rounds": 1,
+       "link": true,
+       "firstPage": 2,
+       "lastPage": 2,
+       "type": "eq"
+    },
     {  "id": "issue4890",
        "file": "pdfs/issue4890.pdf",
        "md5": "1666feb4cd26318c2bdbea6a175dce87",
@@ -3632,6 +3641,15 @@
        "rounds": 1,
        "link": true,
        "lastPage": 1,
+       "type": "eq"
+    },
+    {  "id": "issue10880",
+       "file": "pdfs/issue10880.pdf",
+       "md5": "244ee5ee3ab88db8d8eb51d4416e2c97",
+       "rounds": 1,
+       "link": true,
+       "firstPage": 7,
+       "lastPage": 7,
        "type": "eq"
     },
     {  "id": "issue9650",
