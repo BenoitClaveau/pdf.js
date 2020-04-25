@@ -91,7 +91,7 @@ class PDFNodeStream {
     }
 
     const readers = this._rangeRequestReaders.slice(0);
-    readers.forEach(function(reader) {
+    readers.forEach(function (reader) {
       reader.cancel(reason);
     });
   }
@@ -292,13 +292,13 @@ class BaseRangeReader {
   }
 }
 
-function createRequestOptions(url, headers) {
+function createRequestOptions(parsedUrl, headers) {
   return {
-    protocol: url.protocol,
-    auth: url.auth,
-    host: url.hostname,
-    port: url.port,
-    path: url.path,
+    protocol: parsedUrl.protocol,
+    auth: parsedUrl.auth,
+    host: parsedUrl.hostname,
+    port: parsedUrl.port,
+    path: parsedUrl.path,
     method: "GET",
     headers,
   };
@@ -376,7 +376,7 @@ class PDFNodeStreamRangeReader extends BaseRangeReader {
       }
       this._httpHeaders[property] = value;
     }
-    this._httpHeaders["Range"] = `bytes=${start}-${end - 1}`;
+    this._httpHeaders.Range = `bytes=${start}-${end - 1}`;
 
     const handleResponse = response => {
       if (response.statusCode === 404) {

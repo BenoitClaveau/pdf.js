@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { getGlobalEventBus, parseQueryString } from "./ui_utils.js";
+import { parseQueryString } from "./ui_utils.js";
 
 /**
  * @typedef {Object} PDFLinkServiceOptions
@@ -44,7 +44,7 @@ class PDFLinkService {
     externalLinkEnabled = true,
     ignoreDestinationZoom = false,
   } = {}) {
-    this.eventBus = eventBus || getGlobalEventBus();
+    this.eventBus = eventBus;
     this.externalLinkTarget = externalLinkTarget;
     this.externalLinkRel = externalLinkRel;
     this.externalLinkEnabled = externalLinkEnabled;
@@ -228,8 +228,8 @@ class PDFLinkService {
       if ("search" in params) {
         this.eventBus.dispatch("findfromurlhash", {
           source: this,
-          query: params["search"].replace(/"/g, ""),
-          phraseSearch: params["phrase"] === "true",
+          query: params.search.replace(/"/g, ""),
+          phraseSearch: params.phrase === "true",
         });
       }
       // borrowing syntax from "Parameters for Opening PDF Files"
