@@ -54,6 +54,8 @@ import { apiCompatibilityParams } from "./display/api_compatibility.js";
 import { GlobalWorkerOptions } from "./display/worker_options.js";
 import { renderTextLayer } from "./display/text_layer.js";
 import { SVGGraphics } from "./display/svg.js";
+// BEN
+import { CanvasGraphics } from "./display/canvas.js";
 
 /* eslint-disable-next-line no-unused-vars */
 const pdfjsVersion =
@@ -164,4 +166,5 @@ export {
   renderTextLayer,
   // From "./display/svg.js":
   SVGGraphics,
+  CanvasGraphics, // BEN
 };
