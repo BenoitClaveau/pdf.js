@@ -57,6 +57,7 @@ var COMPONENTS_ES5_DIR = BUILD_DIR + "components-es5/";
 var IMAGE_DECODERS_DIR = BUILD_DIR + "image_decoders";
 var DEFAULT_PREFERENCES_DIR = BUILD_DIR + "default_preferences/";
 var MINIFIED_DIR = BUILD_DIR + "minified/";
+var MINIFIED_ES5_DIR = BUILD_DIR + "minified-es5/";
 var JSDOC_BUILD_DIR = BUILD_DIR + "jsdoc/";
 var GH_PAGES_DIR = BUILD_DIR + "gh-pages/";
 var SRC_DIR = "src/";
@@ -90,7 +91,7 @@ var CSS_VARIABLES_CONFIG = {
   preserve: true,
 };
 
-var DEFINES = {
+const DEFINES = Object.freeze({
   PRODUCTION: true,
   SKIP_BABEL: true,
   TESTING: false,
@@ -102,7 +103,7 @@ var DEFINES = {
   COMPONENTS: false,
   LIB: false,
   IMAGE_DECODERS: false,
-};
+});
 
 function transform(charEncoding, transformFunction) {
   return through.obj(function (vinylFile, enc, done) {
@@ -296,10 +297,7 @@ function replaceJSRootName(amdName, jsName) {
   );
 }
 
-function createBundle(defines) {
-  console.log();
-  console.log("### Bundling files into pdf.js");
-
+function createMainBundle(defines) {
   var mainAMDName = "pdfjs-dist/build/pdf";
   var mainOutputName = "pdf.js";
 
@@ -309,12 +307,14 @@ function createBundle(defines) {
     libraryTarget: "umd",
     umdNamedDefine: true,
   });
-  var mainOutput = gulp
+  return gulp
     .src("./src/pdf.js")
     .pipe(webpack2Stream(mainFileConfig))
     .pipe(replaceWebpackRequire())
     .pipe(replaceJSRootName(mainAMDName, "pdfjsLib"));
+}
 
+function createWorkerBundle(defines) {
   var workerAMDName = "pdfjs-dist/build/pdf.worker";
   var workerOutputName = "pdf.worker.js";
 
@@ -324,13 +324,11 @@ function createBundle(defines) {
     libraryTarget: "umd",
     umdNamedDefine: true,
   });
-
-  var workerOutput = gulp
+  return gulp
     .src("./src/pdf.worker.js")
     .pipe(webpack2Stream(workerFileConfig))
     .pipe(replaceWebpackRequire())
     .pipe(replaceJSRootName(workerAMDName, "pdfjsWorker"));
-  return merge([mainOutput, workerOutput]);
 }
 
 function createWebBundle(defines) {
@@ -415,21 +413,6 @@ function createTestSource(testsName, bot) {
     console.log("### Running " + testsName + " tests");
 
     var PDF_TEST = process.env.PDF_TEST || "test_manifest.json";
-    var PDF_BROWSERS =
-      process.env.PDF_BROWSERS ||
-      "resources/browser_manifests/browser_manifest.json";
-
-    if (!checkFile("test/" + PDF_BROWSERS)) {
-      console.log(
-        "Browser manifest file test/" + PDF_BROWSERS + " does not exist."
-      );
-      console.log(
-        "Copy and adjust the example in test/resources/browser_manifests."
-      );
-      this.emit("error", new Error("Missing manifest file"));
-      return null;
-    }
-
     var args = ["test.js"];
     switch (testsName) {
       case "browser":
@@ -448,9 +431,11 @@ function createTestSource(testsName, bot) {
         this.emit("error", new Error("Unknown name: " + testsName));
         return null;
     }
-    args.push("--browserManifestFile=" + PDF_BROWSERS);
     if (bot) {
       args.push("--strictVerify");
+    }
+    if (process.argv.includes("--noChrome")) {
+      args.push("--noChrome");
     }
 
     var testProcess = startNode(args, { cwd: TEST_DIR, stdio: "inherit" });
@@ -466,26 +451,14 @@ function makeRef(done, bot) {
   console.log();
   console.log("### Creating reference images");
 
-  var PDF_BROWSERS =
-    process.env.PDF_BROWSERS ||
-    "resources/browser_manifests/browser_manifest.json";
-
-  if (!checkFile("test/" + PDF_BROWSERS)) {
-    console.log(
-      "Browser manifest file test/" + PDF_BROWSERS + " does not exist."
-    );
-    console.log(
-      "Copy and adjust the example in test/resources/browser_manifests."
-    );
-    done(new Error("Missing manifest file"));
-    return;
-  }
-
   var args = ["test.js", "--masterMode"];
   if (bot) {
     args.push("--noPrompts", "--strictVerify");
   }
-  args.push("--browserManifestFile=" + PDF_BROWSERS);
+  if (process.argv.includes("--noChrome")) {
+    args.push("--noChrome");
+  }
+
   var testProcess = startNode(args, { cwd: TEST_DIR, stdio: "inherit" });
   testProcess.on("close", function (code) {
     done();
@@ -590,14 +563,6 @@ gulp.task("default_preferences-pre", function () {
   };
   var preprocessor2 = require("./external/builder/preprocessor2.js");
   return merge([
-    gulp.src(
-      [
-        "src/{display,shared}/*.js",
-        "!src/shared/{cffStandardStrings,fonts_utils}.js",
-        "src/pdf.js",
-      ],
-      { base: "src/" }
-    ),
     gulp.src(["web/{app_options,viewer_compatibility}.js"], {
       base: ".",
     }),
@@ -702,13 +667,6 @@ gulp.task("cmaps", function (done) {
   done();
 });
 
-gulp.task(
-  "bundle",
-  gulp.series("buildnumber", function () {
-    return createBundle(DEFINES).pipe(gulp.dest(BUILD_DIR));
-  })
-);
-
 function preprocessCSS(source, mode, defines, cleanup) {
   var outName = getTempFile("~preprocess", ".css");
   builder.preprocessCSS(mode, source, outName);
@@ -738,7 +696,8 @@ function buildGeneric(defines, dir) {
   rimraf.sync(dir);
 
   return merge([
-    createBundle(defines).pipe(gulp.dest(dir + "build")),
+    createMainBundle(defines).pipe(gulp.dest(dir + "build")),
+    createWorkerBundle(defines).pipe(gulp.dest(dir + "build")),
     createWebBundle(defines).pipe(gulp.dest(dir + "web")),
     gulp.src(COMMON_WEB_FILES, { base: "web/" }).pipe(gulp.dest(dir + "web")),
     gulp.src("LICENSE").pipe(gulp.dest(dir)),
@@ -862,6 +821,45 @@ gulp.task(
   })
 );
 
+function buildMinified(defines, dir) {
+  rimraf.sync(dir);
+
+  return merge([
+    createMainBundle(defines).pipe(gulp.dest(dir + "build")),
+    createWorkerBundle(defines).pipe(gulp.dest(dir + "build")),
+    createWebBundle(defines).pipe(gulp.dest(dir + "web")),
+    createImageDecodersBundle(
+      builder.merge(defines, { IMAGE_DECODERS: true })
+    ).pipe(gulp.dest(dir + "image_decoders")),
+    gulp.src(COMMON_WEB_FILES, { base: "web/" }).pipe(gulp.dest(dir + "web")),
+    gulp
+      .src(["web/locale/*/viewer.properties", "web/locale/locale.properties"], {
+        base: "web/",
+      })
+      .pipe(gulp.dest(dir + "web")),
+    gulp
+      .src(["external/bcmaps/*.bcmap", "external/bcmaps/LICENSE"], {
+        base: "external/bcmaps",
+      })
+      .pipe(gulp.dest(dir + "web/cmaps")),
+
+    preprocessHTML("web/viewer.html", defines).pipe(gulp.dest(dir + "web")),
+    preprocessCSS("web/viewer.css", "minified", defines, true)
+      .pipe(
+        postcss([
+          cssvariables(CSS_VARIABLES_CONFIG),
+          calc(),
+          autoprefixer(AUTOPREFIXER_CONFIG),
+        ])
+      )
+      .pipe(gulp.dest(dir + "web")),
+
+    gulp
+      .src("web/compressed.tracemonkey-pldi-09.pdf")
+      .pipe(gulp.dest(dir + "web")),
+  ]);
+}
+
 gulp.task(
   "minified-pre",
   gulp.series("buildnumber", "default_preferences", "locale", function () {
@@ -869,112 +867,85 @@ gulp.task(
     console.log("### Creating minified viewer");
     var defines = builder.merge(DEFINES, { MINIFIED: true, GENERIC: true });
 
-    rimraf.sync(MINIFIED_DIR);
-
-    return merge([
-      createBundle(defines).pipe(gulp.dest(MINIFIED_DIR + "build")),
-      createWebBundle(defines).pipe(gulp.dest(MINIFIED_DIR + "web")),
-      createImageDecodersBundle(
-        builder.merge(defines, { IMAGE_DECODERS: true })
-      ).pipe(gulp.dest(MINIFIED_DIR + "image_decoders")),
-      gulp
-        .src(COMMON_WEB_FILES, { base: "web/" })
-        .pipe(gulp.dest(MINIFIED_DIR + "web")),
-      gulp
-        .src(
-          ["web/locale/*/viewer.properties", "web/locale/locale.properties"],
-          { base: "web/" }
-        )
-        .pipe(gulp.dest(MINIFIED_DIR + "web")),
-      gulp
-        .src(["external/bcmaps/*.bcmap", "external/bcmaps/LICENSE"], {
-          base: "external/bcmaps",
-        })
-        .pipe(gulp.dest(MINIFIED_DIR + "web/cmaps")),
-
-      preprocessHTML("web/viewer.html", defines).pipe(
-        gulp.dest(MINIFIED_DIR + "web")
-      ),
-      preprocessCSS("web/viewer.css", "minified", defines, true)
-        .pipe(
-          postcss([
-            cssvariables(CSS_VARIABLES_CONFIG),
-            calc(),
-            autoprefixer(AUTOPREFIXER_CONFIG),
-          ])
-        )
-        .pipe(gulp.dest(MINIFIED_DIR + "web")),
-
-      gulp
-        .src("web/compressed.tracemonkey-pldi-09.pdf")
-        .pipe(gulp.dest(MINIFIED_DIR + "web")),
-    ]);
+    return buildMinified(defines, MINIFIED_DIR);
   })
 );
 
 gulp.task(
-  "minified-post",
+  "minified-es5-pre",
+  gulp.series("buildnumber", "default_preferences", "locale", function () {
+    console.log();
+    console.log("### Creating minified (ES5) viewer");
+    var defines = builder.merge(DEFINES, {
+      MINIFIED: true,
+      GENERIC: true,
+      SKIP_BABEL: false,
+    });
+
+    return buildMinified(defines, MINIFIED_ES5_DIR);
+  })
+);
+
+function parseMinified(dir) {
+  var pdfFile = fs.readFileSync(dir + "/build/pdf.js").toString();
+  var pdfWorkerFile = fs.readFileSync(dir + "/build/pdf.worker.js").toString();
+  var pdfImageDecodersFile = fs
+    .readFileSync(dir + "/image_decoders/pdf.image_decoders.js")
+    .toString();
+  var viewerFiles = {
+    "pdf.js": pdfFile,
+    "viewer.js": fs.readFileSync(dir + "/web/viewer.js").toString(),
+  };
+
+  console.log();
+  console.log("### Minifying js files");
+
+  var Terser = require("terser");
+  // V8 chokes on very long sequences. Works around that.
+  var optsForHugeFile = { compress: { sequences: false } };
+
+  fs.writeFileSync(dir + "/web/pdf.viewer.js", Terser.minify(viewerFiles).code);
+  fs.writeFileSync(dir + "/build/pdf.min.js", Terser.minify(pdfFile).code);
+  fs.writeFileSync(
+    dir + "/build/pdf.worker.min.js",
+    Terser.minify(pdfWorkerFile, optsForHugeFile).code
+  );
+  fs.writeFileSync(
+    dir + "image_decoders/pdf.image_decoders.min.js",
+    Terser.minify(pdfImageDecodersFile).code
+  );
+
+  console.log();
+  console.log("### Cleaning js files");
+
+  fs.unlinkSync(dir + "/web/viewer.js");
+  fs.unlinkSync(dir + "/web/debugger.js");
+  fs.unlinkSync(dir + "/build/pdf.js");
+  fs.unlinkSync(dir + "/build/pdf.worker.js");
+
+  fs.renameSync(dir + "/build/pdf.min.js", dir + "/build/pdf.js");
+  fs.renameSync(dir + "/build/pdf.worker.min.js", dir + "/build/pdf.worker.js");
+  fs.renameSync(
+    dir + "/image_decoders/pdf.image_decoders.min.js",
+    dir + "/image_decoders/pdf.image_decoders.js"
+  );
+}
+
+gulp.task(
+  "minified",
   gulp.series("minified-pre", function (done) {
-    var pdfFile = fs.readFileSync(MINIFIED_DIR + "/build/pdf.js").toString();
-    var pdfWorkerFile = fs
-      .readFileSync(MINIFIED_DIR + "/build/pdf.worker.js")
-      .toString();
-    var pdfImageDecodersFile = fs
-      .readFileSync(MINIFIED_DIR + "/image_decoders/pdf.image_decoders.js")
-      .toString();
-    var viewerFiles = {
-      "pdf.js": pdfFile,
-      "viewer.js": fs.readFileSync(MINIFIED_DIR + "/web/viewer.js").toString(),
-    };
-
-    console.log();
-    console.log("### Minifying js files");
-
-    var Terser = require("terser");
-    // V8 chokes on very long sequences. Works around that.
-    var optsForHugeFile = { compress: { sequences: false } };
-
-    fs.writeFileSync(
-      MINIFIED_DIR + "/web/pdf.viewer.js",
-      Terser.minify(viewerFiles).code
-    );
-    fs.writeFileSync(
-      MINIFIED_DIR + "/build/pdf.min.js",
-      Terser.minify(pdfFile).code
-    );
-    fs.writeFileSync(
-      MINIFIED_DIR + "/build/pdf.worker.min.js",
-      Terser.minify(pdfWorkerFile, optsForHugeFile).code
-    );
-    fs.writeFileSync(
-      MINIFIED_DIR + "image_decoders/pdf.image_decoders.min.js",
-      Terser.minify(pdfImageDecodersFile).code
-    );
-
-    console.log();
-    console.log("### Cleaning js files");
-
-    fs.unlinkSync(MINIFIED_DIR + "/web/viewer.js");
-    fs.unlinkSync(MINIFIED_DIR + "/web/debugger.js");
-    fs.unlinkSync(MINIFIED_DIR + "/build/pdf.js");
-    fs.unlinkSync(MINIFIED_DIR + "/build/pdf.worker.js");
-    fs.renameSync(
-      MINIFIED_DIR + "/build/pdf.min.js",
-      MINIFIED_DIR + "/build/pdf.js"
-    );
-    fs.renameSync(
-      MINIFIED_DIR + "/build/pdf.worker.min.js",
-      MINIFIED_DIR + "/build/pdf.worker.js"
-    );
-    fs.renameSync(
-      MINIFIED_DIR + "/image_decoders/pdf.image_decoders.min.js",
-      MINIFIED_DIR + "/image_decoders/pdf.image_decoders.js"
-    );
+    parseMinified(MINIFIED_DIR);
     done();
   })
 );
 
-gulp.task("minified", gulp.series("minified-post"));
+gulp.task(
+  "minified-es5",
+  gulp.series("minified-es5-pre", function (done) {
+    parseMinified(MINIFIED_ES5_DIR);
+    done();
+  })
+);
 
 function preprocessDefaultPreferences(content) {
   var preprocessor2 = require("./external/builder/preprocessor2.js");
@@ -1032,7 +1003,12 @@ gulp.task(
     ];
 
     return merge([
-      createBundle(defines).pipe(gulp.dest(MOZCENTRAL_CONTENT_DIR + "build")),
+      createMainBundle(defines).pipe(
+        gulp.dest(MOZCENTRAL_CONTENT_DIR + "build")
+      ),
+      createWorkerBundle(defines).pipe(
+        gulp.dest(MOZCENTRAL_CONTENT_DIR + "build")
+      ),
       createWebBundle(defines).pipe(gulp.dest(MOZCENTRAL_CONTENT_DIR + "web")),
       gulp
         .src(MOZCENTRAL_COMMON_WEB_FILES, { base: "web/" })
@@ -1087,7 +1063,12 @@ gulp.task(
     var version = getVersionJSON().version;
 
     return merge([
-      createBundle(defines).pipe(gulp.dest(CHROME_BUILD_CONTENT_DIR + "build")),
+      createMainBundle(defines).pipe(
+        gulp.dest(CHROME_BUILD_CONTENT_DIR + "build")
+      ),
+      createWorkerBundle(defines).pipe(
+        gulp.dest(CHROME_BUILD_CONTENT_DIR + "build")
+      ),
       createWebBundle(defines).pipe(
         gulp.dest(CHROME_BUILD_CONTENT_DIR + "web")
       ),

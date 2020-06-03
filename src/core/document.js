@@ -74,6 +74,7 @@ class Page {
     ref,
     fontCache,
     builtInCMapCache,
+    globalImageCache,
     pdfFunctionFactory,
   }) {
     this.pdfManager = pdfManager;
@@ -83,6 +84,7 @@ class Page {
     this.ref = ref;
     this.fontCache = fontCache;
     this.builtInCMapCache = builtInCMapCache;
+    this.globalImageCache = globalImageCache;
     this.pdfFunctionFactory = pdfFunctionFactory;
     this.evaluatorOptions = pdfManager.evaluatorOptions;
     this.resourcesPromise = null;
@@ -261,6 +263,7 @@ class Page {
       idFactory: this.idFactory,
       fontCache: this.fontCache,
       builtInCMapCache: this.builtInCMapCache,
+      globalImageCache: this.globalImageCache,
       options: this.evaluatorOptions,
       pdfFunctionFactory: this.pdfFunctionFactory,
     });
@@ -302,11 +305,15 @@ class Page {
         for (const annotation of annotations) {
           if (isAnnotationRenderable(annotation, intent)) {
             opListPromises.push(
-              annotation.getOperatorList(
-                partialEvaluator,
-                task,
-                renderInteractiveForms
-              )
+              annotation
+                .getOperatorList(partialEvaluator, task, renderInteractiveForms)
+                .catch(function (reason) {
+                  warn(
+                    "getOperatorList - ignoring annotation data during " +
+                      `"${task.name}" task: "${reason}".`
+                  );
+                  return null;
+                })
             );
           }
         }
@@ -350,6 +357,7 @@ class Page {
         idFactory: this.idFactory,
         fontCache: this.fontCache,
         builtInCMapCache: this.builtInCMapCache,
+        globalImageCache: this.globalImageCache,
         options: this.evaluatorOptions,
         pdfFunctionFactory: this.pdfFunctionFactory,
       });
@@ -389,30 +397,24 @@ class Page {
     const parsedAnnotations = this.pdfManager
       .ensure(this, "annotations")
       .then(() => {
-        const annotationRefs = this.annotations;
         const annotationPromises = [];
-        for (let i = 0, ii = annotationRefs.length; i < ii; i++) {
+        for (const annotationRef of this.annotations) {
           annotationPromises.push(
             AnnotationFactory.create(
               this.xref,
-              annotationRefs[i],
+              annotationRef,
               this.pdfManager,
               this.idFactory
-            )
+            ).catch(function (reason) {
+              warn(`_parsedAnnotations: "${reason}".`);
+              return null;
+            })
           );
         }
 
-        return Promise.all(annotationPromises).then(
-          function (annotations) {
-            return annotations.filter(function isDefined(annotation) {
-              return !!annotation;
-            });
-          },
-          function (reason) {
-            warn(`_parsedAnnotations: "${reason}".`);
-            return [];
-          }
-        );
+        return Promise.all(annotationPromises).then(function (annotations) {
+          return annotations.filter(annotation => !!annotation);
+        });
       });
 
     return shadow(this, "_parsedAnnotations", parsedAnnotations);
@@ -763,7 +765,15 @@ class PDFDocument {
 
   _getLinearizationPage(pageIndex) {
     const { catalog, linearization } = this;
-    assert(linearization && linearization.pageFirst === pageIndex);
+    if (
+      typeof PDFJSDev === "undefined" ||
+      PDFJSDev.test("!PRODUCTION || TESTING")
+    ) {
+      assert(
+        linearization && linearization.pageFirst === pageIndex,
+        "_getLinearizationPage - invalid pageIndex argument."
+      );
+    }
 
     const ref = Ref.get(linearization.objectNumberFirst, 0);
     return this.xref
@@ -810,6 +820,7 @@ class PDFDocument {
         ref,
         fontCache: catalog.fontCache,
         builtInCMapCache: catalog.builtInCMapCache,
+        globalImageCache: catalog.globalImageCache,
         pdfFunctionFactory: this.pdfFunctionFactory,
       });
     }));
@@ -833,8 +844,10 @@ class PDFDocument {
     return this.catalog.fontFallback(id, handler);
   }
 
-  async cleanup() {
-    return this.catalog ? this.catalog.cleanup() : clearPrimitiveCaches();
+  async cleanup(manuallyTriggered = false) {
+    return this.catalog
+      ? this.catalog.cleanup(manuallyTriggered)
+      : clearPrimitiveCaches();
   }
 }
 
