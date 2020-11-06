@@ -1927,8 +1927,7 @@ const CanvasGraphics = (function CanvasGraphicsClosure() {
               this.commonObjs,
               this.objs,
               this.canvasFactory,
-              this.webGLContext,
-              this.imageLayer
+              this.webGLContext
             );
           },
         };
@@ -2590,7 +2589,7 @@ const CanvasGraphics = (function CanvasGraphicsClosure() {
     ) {
       if (tag === "OC") {
         this.markedContentStack.push({
-          visible: this.optionalContentConfig.isVisible(properties),
+          visible: this.optionalContentConfig ? this.optionalContentConfig.isVisible(properties) : true,
         });
       } else {
         this.markedContentStack.push({
