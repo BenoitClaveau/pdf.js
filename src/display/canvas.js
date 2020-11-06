@@ -1927,7 +1927,8 @@ const CanvasGraphics = (function CanvasGraphicsClosure() {
               this.commonObjs,
               this.objs,
               this.canvasFactory,
-              this.webGLContext
+              this.webGLContext,
+              this.imageLayer
             );
           },
         };
