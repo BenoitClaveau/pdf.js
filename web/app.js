@@ -19,6 +19,7 @@ import {
   AutoPrintRegExp,
   DEFAULT_SCALE_VALUE,
   EventBus,
+  generateRandomStringForSandbox,
   getActiveOrFocusedElement,
   getPDFFileNameFromURL,
   isValidRotation,
@@ -179,6 +180,10 @@ class DefaultExternalServices {
   static get isInAutomation() {
     return shadow(this, "isInAutomation", false);
   }
+
+  static get scripting() {
+    throw new Error("Not implemented: scripting");
+  }
 }
 
 const PDFViewerApplication = {
@@ -242,6 +247,7 @@ const PDFViewerApplication = {
   triggerDelayedFallback: null,
   _saveInProgress: false,
   _wheelUnusedTicks: 0,
+  _idleCallbacks: new Set(),
 
   // Called once when the document is loaded.
   async initialize(appConfig) {
@@ -738,6 +744,10 @@ const PDFViewerApplication = {
     this.contentDispositionFilename = null;
     this.triggerDelayedFallback = null;
     this._saveInProgress = false;
+    for (const callback of this._idleCallbacks) {
+      window.cancelIdleCallback(callback);
+    }
+    this._idleCallbacks.clear();
 
     this.pdfSidebar.reset();
     this.pdfOutlineViewer.reset();
@@ -1329,10 +1339,95 @@ const PDFViewerApplication = {
       pdfViewer.optionalContentConfigPromise.then(optionalContentConfig => {
         this.pdfLayerViewer.render({ optionalContentConfig, pdfDocument });
       });
+      if ("requestIdleCallback" in window) {
+        const callback = window.requestIdleCallback(
+          () => {
+            this._collectTelemetry(pdfDocument);
+            this._idleCallbacks.delete(callback);
+          },
+          { timeout: 1000 }
+        );
+        this._idleCallbacks.add(callback);
+      }
     });
 
     this._initializePageLabels(pdfDocument);
     this._initializeMetadata(pdfDocument);
+    this._initializeJavaScript(pdfDocument);
+  },
+
+  /**
+   * @private
+   */
+  async _initializeJavaScript(pdfDocument) {
+    const objects = await pdfDocument.getFieldObjects();
+
+    if (pdfDocument !== this.pdfDocument) {
+      return; // The document was closed while the JavaScript data resolved.
+    }
+    if (!objects || !AppOptions.get("enableScripting")) {
+      return;
+    }
+    const scripting = this.externalServices.scripting;
+
+    window.addEventListener("updateFromSandbox", function (event) {
+      const detail = event.detail;
+      const id = detail.id;
+      if (!id) {
+        switch (detail.command) {
+          case "println":
+            console.log(detail.value);
+            break;
+          case "clear":
+            console.clear();
+            break;
+          case "alert":
+            // eslint-disable-next-line no-alert
+            window.alert(detail.value);
+            break;
+          case "error":
+            console.error(detail.value);
+            break;
+        }
+        return;
+      }
+
+      const element = document.getElementById(id);
+      if (element) {
+        element.dispatchEvent(new CustomEvent("updateFromSandbox", { detail }));
+      } else {
+        const value = detail.value;
+        if (value !== undefined && value !== null) {
+          // the element hasn't been rendered yet so use annotation storage
+          pdfDocument.annotationStorage.setValue(id, detail.value);
+        }
+      }
+    });
+
+    window.addEventListener("dispatchEventInSandbox", function (event) {
+      scripting.dispatchEventInSandbox(event.detail);
+    });
+
+    const dispatchEventName = generateRandomStringForSandbox(objects);
+    const calculationOrder = [];
+    scripting.createSandbox({ objects, dispatchEventName, calculationOrder });
+  },
+
+  /**
+   * A place to fetch data for telemetry after one page is rendered and the
+   * viewer is idle.
+   * @private
+   */
+  async _collectTelemetry(pdfDocument) {
+    const markInfo = await this.pdfDocument.getMarkInfo();
+    if (pdfDocument !== this.pdfDocument) {
+      return; // Document was closed while waiting for mark info.
+    }
+    const tagged = markInfo?.Marked || false;
+    this.externalServices.reportTelemetry({
+      type: "tagged",
+      tagged,
+    });
   },
 
   /**
@@ -1667,6 +1762,7 @@ const PDFViewerApplication = {
           "Warning: The PDF is not fully loaded for printing."
         )
         .then(notReadyMessage => {
+          // eslint-disable-next-line no-alert
           window.alert(notReadyMessage);
         });
       return;
@@ -1962,12 +2058,7 @@ async function loadFakeWorker() {
     GlobalWorkerOptions.workerSrc = AppOptions.get("workerSrc");
   }
   if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")) {
-    if (typeof SystemJS !== "object") {
-      // Manually load SystemJS, since it's only necessary for fake workers.
-      await loadScript("../node_modules/systemjs/dist/system.js");
-      await loadScript("../systemjs.config.js");
-    }
-    window.pdfjsWorker = await SystemJS.import("pdfjs/core/worker.js");
+    window.pdfjsWorker = await import("pdfjs/core/worker.js");
     return undefined;
   }
   return loadScript(PDFWorker.getWorkerSrc());
@@ -2446,7 +2537,7 @@ function webViewerPageNumberChanged(evt) {
   // Note that for `<input type="number">` HTML elements, an empty string will
   // be returned for non-number inputs; hence we simply do nothing in that case.
   if (evt.value !== "") {
-    pdfViewer.currentPageLabel = evt.value;
+    PDFViewerApplication.pdfLinkService.goToPage(evt.value);
   }
 
   // Ensure that the page number input displays the correct value, even if the

@@ -12,7 +12,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/* eslint no-var: error */
 
 import { assert, BaseException, warn } from "../shared/util.js";
 
@@ -23,6 +22,22 @@ function getLookupTableFactory(initializer) {
       lookup = Object.create(null);
       initializer(lookup);
       initializer = null;
+    }
+    return lookup;
+  };
+}
+
+function getArrayLookupTableFactory(initializer) {
+  let lookup;
+  return function () {
+    if (initializer) {
+      let arr = initializer();
+      initializer = null;
+      lookup = Object.create(null);
+      for (let i = 0, ii = arr.length; i < ii; i += 2) {
+        lookup[arr[i]] = arr[i + 1];
+      }
+      arr = null;
     }
     return lookup;
   };
@@ -213,6 +228,7 @@ function escapePDFName(str) {
 export {
   escapePDFName,
   getLookupTableFactory,
+  getArrayLookupTableFactory,
   MissingDataException,
   XRefEntryException,
   XRefParseException,

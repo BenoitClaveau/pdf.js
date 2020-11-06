@@ -12,7 +12,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/* eslint no-var: error */
 
 /**
  * @module pdfjsLib
@@ -808,6 +807,23 @@ class PDFDocumentProxy {
   }
 
   /**
+   * @typedef {Object} MarkInfo
+   * Properties correspond to Table 321 of the PDF 32000-1:2008 spec.
+   * @property {boolean} Marked
+   * @property {boolean} UserProperties
+   * @property {boolean} Suspects
+   */
+
+  /**
+   * @returns {Promise<MarkInfo | null>} A promise that is resolved with
+   *   a {MarkInfo} object that contains the MarkInfo flags for the PDF
+   *   document, or `null` when no MarkInfo values are present in the PDF file.
+   */
+  getMarkInfo() {
+    return this._transport.getMarkInfo();
+  }
+
+  /**
    * @returns {Promise<TypedArray>} A promise that is resolved with a
    *   {TypedArray} that has the raw data from the PDF.
    */
@@ -877,6 +893,24 @@ class PDFDocumentProxy {
    */
   saveDocument(annotationStorage) {
     return this._transport.saveDocument(annotationStorage);
+  }
+
+  /**
+   * @returns {Promise<Array<Object> | null>} A promise that is resolved with an
+   *   {Array<Object>} containing /AcroForm field data for the JS sandbox,
+   *   or `null` when no field data is present in the PDF file.
+   */
+  getFieldObjects() {
+    return this._transport.getFieldObjects();
+  }
+
+  /**
+   * @returns {Promise<Array<string> | null>} A promise that is resolved with an
+   *   {Array<string>} containing IDs of annotations that have a calculation
+   *   action, or `null` when no such annotations are present in the PDF file.
+   */
+  getCalculationOrderIds() {
+    return this._transport.getCalculationOrderIds();
   }
 }
 
@@ -1156,8 +1190,7 @@ class PDFPageProxy {
         pageIndex: this._pageIndex,
         intent: renderingIntent,
         renderInteractiveForms: renderInteractiveForms === true,
-        annotationStorage:
-          (annotationStorage && annotationStorage.getAll()) || null,
+        annotationStorage: annotationStorage?.getAll() || null,
       });
     }
 
@@ -1735,12 +1768,7 @@ const PDFWorker = (function PDFWorkerClosure() {
         return mainWorkerMessageHandler;
       }
       if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")) {
-        if (typeof SystemJS !== "object") {
-          // Manually load SystemJS, since it's only necessary for fake workers.
-          await loadScript("../node_modules/systemjs/dist/system.js");
-          await loadScript("../systemjs.config.js");
-        }
-        const worker = await SystemJS.import("pdfjs/core/worker.js");
+        const worker = await import("pdfjs/core/worker.js");
         return worker.WorkerMessageHandler;
       }
       if (
@@ -2545,8 +2573,7 @@ class WorkerTransport {
     return this.messageHandler
       .sendWithPromise("SaveDocument", {
         numPages: this._numPages,
-        annotationStorage:
-          (annotationStorage && annotationStorage.getAll()) || null,
+        annotationStorage: annotationStorage?.getAll() || null,
         filename: this._fullReader ? this._fullReader.filename : null,
       })
       .finally(() => {
@@ -2554,6 +2581,14 @@ class WorkerTransport {
           annotationStorage.resetModified();
         }
       });
+  }
+
+  getFieldObjects() {
+    return this.messageHandler.sendWithPromise("GetFieldObjects", null);
+  }
+
+  getCalculationOrderIds() {
+    return this.messageHandler.sendWithPromise("GetCalculationOrderIds", null);
   }
 
   getDestinations() {
@@ -2625,6 +2660,10 @@ class WorkerTransport {
             : null,
         };
       });
+  }
+
+  getMarkInfo() {
+    return this.messageHandler.sendWithPromise("GetMarkInfo", null);
   }
 
   getStats() {

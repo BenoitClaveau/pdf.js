@@ -12,7 +12,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/* eslint no-var: error */
 
 import {
   addLinkAttributes,
@@ -222,7 +221,7 @@ class AnnotationElement {
       }
 
       if (data.color) {
-        container.style.borderColor = Util.makeCssRgb(
+        container.style.borderColor = Util.makeHexColor(
           data.color[0] | 0,
           data.color[1] | 0,
           data.color[2] | 0
@@ -238,6 +237,35 @@ class AnnotationElement {
     container.style.width = `${width}px`;
     container.style.height = `${height}px`;
     return container;
+  }
+
+  /**
+   * Create quadrilaterals for the quadPoints.
+   *
+   * @private
+   * @param {boolean} ignoreBorder
+   * @memberof AnnotationElement
+   * @returns {HTMLSectionElement}
+   */
+  _createQuadrilaterals(ignoreBorder = false) {
+    if (!this.data.quadPoints) {
+      return null;
+    }
+
+    const quadrilaterals = [];
+    const savedRect = this.data.rect;
+    for (const quadPoint of this.data.quadPoints) {
+      const rect = [
+        quadPoint[2].x,
+        quadPoint[2].y,
+        quadPoint[1].x,
+        quadPoint[1].y,
+      ];
+      this.data.rect = rect;
+      quadrilaterals.push(this._createContainer(ignoreBorder));
+    }
+    this.data.rect = savedRect;
+    return quadrilaterals;
   }
 
   /**
@@ -293,7 +321,8 @@ class LinkAnnotationElement extends AnnotationElement {
     const isRenderable = !!(
       parameters.data.url ||
       parameters.data.dest ||
-      parameters.data.action
+      parameters.data.action ||
+      parameters.data.isTooltipOnly
     );
     super(parameters, isRenderable);
   }
@@ -322,8 +351,10 @@ class LinkAnnotationElement extends AnnotationElement {
       });
     } else if (data.action) {
       this._bindNamedAction(link, data.action);
-    } else {
+    } else if (data.dest) {
       this._bindLink(link, data.dest);
+    } else {
+      this._bindLink(link, "");
     }
 
     this.container.appendChild(link);
@@ -342,11 +373,11 @@ class LinkAnnotationElement extends AnnotationElement {
     link.href = this.linkService.getDestinationHash(destination);
     link.onclick = () => {
       if (destination) {
-        this.linkService.navigateTo(destination);
+        this.linkService.goToDestination(destination);
       }
       return false;
     };
-    if (destination) {
+    if (destination || destination === /* isTooltipOnly = */ "") {
       link.className = "internalLink";
     }
   }
@@ -420,6 +451,10 @@ class WidgetAnnotationElement extends AnnotationElement {
    */
   render() {
     // Show only the container for unsupported field types.
+    if (this.data.alternativeText) {
+      this.container.title = this.data.alternativeText;
+    }
+
     return this.container;
   }
 }
@@ -462,6 +497,8 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
         element.setAttribute("value", textContent);
       }
 
+      element.setAttribute("id", id);
+
       element.addEventListener("input", function (event) {
         storage.setValue(id, event.target.value);
       });
@@ -469,6 +506,35 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
       element.addEventListener("blur", function (event) {
         event.target.setSelectionRange(0, 0);
       });
+
+      if (this.data.actions) {
+        element.addEventListener("updateFromSandbox", function (event) {
+          const data = event.detail;
+          if ("value" in data) {
+            event.target.value = event.detail.value;
+          } else if ("focus" in data) {
+            event.target.focus({ preventScroll: false });
+          }
+        });
+
+        for (const eventType of Object.keys(this.data.actions)) {
+          switch (eventType) {
+            case "Format":
+              element.addEventListener("blur", function (event) {
+                window.dispatchEvent(
+                  new CustomEvent("dispatchEventInSandbox", {
+                    detail: {
+                      id,
+                      name: "Format",
+                      value: event.target.value,
+                    },
+                  })
+                );
+              });
+              break;
+          }
+        }
+      }
 
       element.disabled = this.data.readOnly;
       element.name = this.data.fieldName;
@@ -647,6 +713,11 @@ class PushButtonWidgetAnnotationElement extends LinkAnnotationElement {
     // as performing actions on form fields (resetting, submitting, et cetera).
     const container = super.render();
     container.className = "buttonWidgetAnnotation pushButton";
+
+    if (this.data.alternativeText) {
+      container.title = this.data.alternativeText;
+    }
+
     return container;
   }
 }
@@ -678,7 +749,7 @@ class ChoiceWidgetAnnotationElement extends WidgetAnnotationElement {
     // used and the full array of field values is stored.
     storage.getOrCreateValue(
       id,
-      this.data.fieldValue.length > 0 ? this.data.fieldValue[0] : null
+      this.data.fieldValue.length > 0 ? this.data.fieldValue[0] : undefined
     );
 
     const selectElement = document.createElement("select");
@@ -747,14 +818,14 @@ class PopupAnnotationElement extends AnnotationElement {
     }
 
     const selector = `[data-annotation-id="${this.data.parentId}"]`;
-    const parentElement = this.layer.querySelector(selector);
-    if (!parentElement) {
+    const parentElements = this.layer.querySelectorAll(selector);
+    if (parentElements.length === 0) {
       return this.container;
     }
 
     const popup = new PopupElement({
       container: this.container,
-      trigger: parentElement,
+      trigger: Array.from(parentElements),
       color: this.data.color,
       title: this.data.title,
       modificationDate: this.data.modificationDate,
@@ -763,13 +834,20 @@ class PopupAnnotationElement extends AnnotationElement {
 
     // Position the popup next to the parent annotation's container.
     // PDF viewers ignore a popup annotation's rectangle.
-    const parentTop = parseFloat(parentElement.style.top),
-      parentLeft = parseFloat(parentElement.style.left),
-      parentWidth = parseFloat(parentElement.style.width);
-    const popupLeft = parentLeft + parentWidth;
+    const page = this.page;
+    const rect = Util.normalizeRect([
+      this.data.parentRect[0],
+      page.view[3] - this.data.parentRect[1] + page.view[1],
+      this.data.parentRect[2],
+      page.view[3] - this.data.parentRect[3] + page.view[1],
+    ]);
+    const popupLeft =
+      rect[0] + this.data.parentRect[2] - this.data.parentRect[0];
+    const popupTop = rect[1];
 
-    this.container.style.transformOrigin = `${-popupLeft}px ${-parentTop}px`;
+    this.container.style.transformOrigin = `${-popupLeft}px ${-popupTop}px`;
     this.container.style.left = `${popupLeft}px`;
+    this.container.style.top = `${popupTop}px`;
 
     this.container.appendChild(popup.render());
     return this.container;
@@ -818,7 +896,7 @@ class PopupElement {
       const r = BACKGROUND_ENLIGHT * (255 - color[0]) + color[0];
       const g = BACKGROUND_ENLIGHT * (255 - color[1]) + color[1];
       const b = BACKGROUND_ENLIGHT * (255 - color[2]) + color[2];
-      popup.style.backgroundColor = Util.makeCssRgb(r | 0, g | 0, b | 0);
+      popup.style.backgroundColor = Util.makeHexColor(r | 0, g | 0, b | 0);
     }
 
     const title = document.createElement("h1");
@@ -843,10 +921,16 @@ class PopupElement {
     const contents = this._formatContents(this.contents);
     popup.appendChild(contents);
 
+    if (!Array.isArray(this.trigger)) {
+      this.trigger = [this.trigger];
+    }
+
     // Attach the event listeners to the trigger element.
-    this.trigger.addEventListener("click", this._toggle.bind(this));
-    this.trigger.addEventListener("mouseover", this._show.bind(this, false));
-    this.trigger.addEventListener("mouseout", this._hide.bind(this, false));
+    this.trigger.forEach(element => {
+      element.addEventListener("click", this._toggle.bind(this));
+      element.addEventListener("mouseover", this._show.bind(this, false));
+      element.addEventListener("mouseout", this._hide.bind(this, false));
+    });
     popup.addEventListener("click", this._hide.bind(this, true));
 
     wrapper.appendChild(popup);
@@ -1282,6 +1366,7 @@ class HighlightAnnotationElement extends AnnotationElement {
       parameters.data.contents
     );
     super(parameters, isRenderable, /* ignoreBorder = */ true);
+    this.quadrilaterals = this._createQuadrilaterals(/* ignoreBorder = */ true);
   }
 
   /**
@@ -1297,7 +1382,7 @@ class HighlightAnnotationElement extends AnnotationElement {
     if (!this.data.hasPopup) {
       this._createPopup(this.container, null, this.data);
     }
-    return this.container;
+    return this.quadrilaterals || this.container;
   }
 }
 
@@ -1525,7 +1610,14 @@ class AnnotationLayer {
           parameters.annotationStorage || new AnnotationStorage(),
       });
       if (element.isRenderable) {
-        parameters.div.appendChild(element.render());
+        const rendered = element.render();
+        if (Array.isArray(rendered)) {
+          for (const renderedElement of rendered) {
+            parameters.div.appendChild(renderedElement);
+          }
+        } else {
+          parameters.div.appendChild(rendered);
+        }
       }
     }
   }
@@ -1538,14 +1630,15 @@ class AnnotationLayer {
    * @memberof AnnotationLayer
    */
   static update(parameters) {
+    const transform = `matrix(${parameters.viewport.transform.join(",")})`;
     for (const data of parameters.annotations) {
-      const element = parameters.div.querySelector(
+      const elements = parameters.div.querySelectorAll(
         `[data-annotation-id="${data.id}"]`
       );
-      if (element) {
-        element.style.transform = `matrix(${parameters.viewport.transform.join(
-          ","
-        )})`;
+      if (elements) {
+        elements.forEach(element => {
+          element.style.transform = transform;
+        });
       }
     }
     parameters.div.removeAttribute("hidden");

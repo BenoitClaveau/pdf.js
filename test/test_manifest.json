@@ -1914,6 +1914,12 @@
        "type": "eq",
        "about": "Please note that this file currently renders incorrectly."
     },
+    {  "id": "issue12399",
+       "file": "pdfs/issue12399_reduced.pdf",
+       "md5": "01bdd258be93e10f8399708eecedbfd6",
+       "rounds": 1,
+       "type": "eq"
+    },
     {  "id": "issue5808-text",
        "file": "pdfs/issue5808.pdf",
        "md5": "e0584dd540d7859d6c191aa53379692e",
@@ -2892,6 +2898,15 @@
        "link": false,
        "type": "eq"
     },
+    {  "id": "issue12533",
+       "file": "pdfs/issue12533.pdf",
+       "md5": "9824904320f884eee20d4e4573008e6f",
+       "rounds": 1,
+       "link": true,
+       "firstPage": 17,
+       "lastPage": 18,
+       "type": "eq"
+    },
     {  "id": "issue1466",
       "file": "pdfs/issue1466.pdf",
       "md5": "8a8877432e5bb10cfd50d60488d947bb",
@@ -3653,6 +3668,16 @@
       "type": "eq",
       "about": "CFF font that is drawn with clipping."
     },
+    {  "id": "prefilled_f1040",
+       "file": "pdfs/prefilled_f1040.pdf",
+       "md5": "2335da66fb7c2c3b84971597f27785e2",
+       "rounds": 1,
+       "type": "eq",
+       "print": true,
+       "annotationStorage": {
+         "1605R": true
+       }
+    },
     {  "id": "clippath",
       "file": "pdfs/clippath.pdf",
       "md5": "7ab95c0f106dccd90d6569f241fe8771",
@@ -4146,6 +4171,20 @@
       "lastPage": 1,
       "rounds": 1,
       "type": "eq"
+    },
+    {  "id": "bug1669099",
+       "file": "pdfs/bug1669099.pdf",
+       "md5": "34421549d58e2b6eeddc674759381f7d",
+       "rounds": 1,
+       "type": "eq",
+       "print": true,
+       "annotationStorage": {
+         "29R": true,
+         "33R": true,
+         "37R": true,
+         "65R": true,
+         "69R": true
+       }
     },
     {  "id": "issue1171.pdf",
        "file": "pdfs/issue1171.pdf",
@@ -4745,5 +4784,12 @@
        "rounds": 2,
        "lastPage": 1,
        "type": "fbf"
-    }
+    },
+    {  "id": "pr12564",
+      "file": "pdfs/pr12564.pdf",
+      "md5": "24a19949a2541b960363832cf141f2f2",
+      "rounds": 1,
+      "type": "eq",
+      "annotations": true
+   }
 ]
