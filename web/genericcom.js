@@ -17,6 +17,7 @@ import { DefaultExternalServices, PDFViewerApplication } from "./app.js";
 import { BasePreferences } from "./preferences.js";
 import { DownloadManager } from "./download_manager.js";
 import { GenericL10n } from "./genericl10n.js";
+import { GenericScripting } from "./generic_scripting.js";
 
 if (typeof PDFJSDev !== "undefined" && !PDFJSDev.test("GENERIC")) {
   throw new Error(
@@ -48,6 +49,10 @@ class GenericExternalServices extends DefaultExternalServices {
 
   static createL10n({ locale = "en-US" }) {
     return new GenericL10n(locale);
+  }
+
+  static createScripting({ sandboxBundleSrc }) {
+    return new GenericScripting(sandboxBundleSrc);
   }
 }
 PDFViewerApplication.externalServices = GenericExternalServices;

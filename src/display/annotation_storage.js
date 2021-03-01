@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+import { deprecated } from "./display_utils.js";
 import { objectFromEntries } from "../shared/util.js";
 
 /**
@@ -33,7 +34,7 @@ class AnnotationStorage {
 
   /**
    * Get the value for a given key if it exists
-   * or store and return the default value
+   * or return the default value
    *
    * @public
    * @memberof AnnotationStorage
@@ -41,7 +42,19 @@ class AnnotationStorage {
    * @param {Object} defaultValue
    * @returns {Object}
    */
+  getValue(key, defaultValue) {
+    if (this._storage.has(key)) {
+      return this._storage.get(key);
+    }
+
+    return defaultValue;
+  }
+
+  /**
+   * @deprecated
+   */
   getOrCreateValue(key, defaultValue) {
+    deprecated("Use getValue instead.");
     if (this._storage.has(key)) {
       return this._storage.get(key);
     }
@@ -59,17 +72,26 @@ class AnnotationStorage {
    * @param {Object} value
    */
   setValue(key, value) {
-    if (this._storage.get(key) !== value) {
+    const obj = this._storage.get(key);
+    let modified = false;
+    if (obj !== undefined) {
+      for (const [entry, val] of Object.entries(value)) {
+        if (obj[entry] !== val) {
+          modified = true;
+          obj[entry] = val;
+        }
+      }
+    } else {
+      this._storage.set(key, value);
+      modified = true;
+    }
+    if (modified) {
       this._setModified();
     }
-    this._storage.set(key, value);
   }
 
   getAll() {
-    if (this._storage.size === 0) {
-      return null;
-    }
-    return objectFromEntries(this._storage);
+    return this._storage.size > 0 ? objectFromEntries(this._storage) : null;
   }
 
   get size() {
@@ -95,6 +117,14 @@ class AnnotationStorage {
         this.onResetModified();
       }
     }
+  }
+
+  /**
+   * PLEASE NOTE: Only intended for usage within the API itself.
+   * @ignore
+   */
+  get serializable() {
+    return this._storage.size > 0 ? this._storage : null;
   }
 }
 

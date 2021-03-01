@@ -14,7 +14,6 @@
  */
 
 import { FindState } from "./pdf_find_controller.js";
-import { NullL10n } from "./ui_utils.js";
 
 const MATCHES_COUNT_LIMIT = 1000;
 
@@ -25,19 +24,19 @@ const MATCHES_COUNT_LIMIT = 1000;
  * is done by PDFFindController.
  */
 class PDFFindBar {
-  constructor(options, eventBus, l10n = NullL10n) {
+  constructor(options, eventBus, l10n) {
     this.opened = false;
 
-    this.bar = options.bar || null;
-    this.toggleButton = options.toggleButton || null;
-    this.findField = options.findField || null;
-    this.highlightAll = options.highlightAllCheckbox || null;
-    this.caseSensitive = options.caseSensitiveCheckbox || null;
-    this.entireWord = options.entireWordCheckbox || null;
-    this.findMsg = options.findMsg || null;
-    this.findResultsCount = options.findResultsCount || null;
-    this.findPreviousButton = options.findPreviousButton || null;
-    this.findNextButton = options.findNextButton || null;
+    this.bar = options.bar;
+    this.toggleButton = options.toggleButton;
+    this.findField = options.findField;
+    this.highlightAll = options.highlightAllCheckbox;
+    this.caseSensitive = options.caseSensitiveCheckbox;
+    this.entireWord = options.entireWordCheckbox;
+    this.findMsg = options.findMsg;
+    this.findResultsCount = options.findResultsCount;
+    this.findPreviousButton = options.findPreviousButton;
+    this.findNextButton = options.findNextButton;
     this.eventBus = eventBus;
     this.l10n = l10n;
 
@@ -104,7 +103,6 @@ class PDFFindBar {
   }
 
   updateUIState(state, previous, matchesCount) {
-    let notFound = false;
     let findMsg = "";
     let status = "";
 
@@ -118,7 +116,7 @@ class PDFFindBar {
 
       case FindState.NOT_FOUND:
         findMsg = this.l10n.get("find_not_found", null, "Phrase not found");
-        notFound = true;
+        status = "notFound";
         break;
 
       case FindState.WRAPPED:
@@ -137,8 +135,6 @@ class PDFFindBar {
         }
         break;
     }
-
-    this.findField.classList.toggle("notFound", notFound);
     this.findField.setAttribute("data-status", status);
 
     Promise.resolve(findMsg).then(msg => {
@@ -150,9 +146,6 @@ class PDFFindBar {
   }
 
   updateResultsCount({ current = 0, total = 0 } = {}) {
-    if (!this.findResultsCount) {
-      return; // No UI control is provided.
-    }
     const limit = MATCHES_COUNT_LIMIT;
     let matchesCountMsg = "";
 
@@ -214,6 +207,7 @@ class PDFFindBar {
     if (!this.opened) {
       this.opened = true;
       this.toggleButton.classList.add("toggled");
+      this.toggleButton.setAttribute("aria-expanded", "true");
       this.bar.classList.remove("hidden");
     }
     this.findField.select();
@@ -228,6 +222,7 @@ class PDFFindBar {
     }
     this.opened = false;
     this.toggleButton.classList.remove("toggled");
+    this.toggleButton.setAttribute("aria-expanded", "false");
     this.bar.classList.add("hidden");
 
     this.eventBus.dispatch("findbarclose", { source: this });

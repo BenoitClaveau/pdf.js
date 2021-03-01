@@ -19,6 +19,7 @@ import {
   bytesToString,
   createPromiseCapability,
   createValidAbsoluteUrl,
+  DocumentActionEventType,
   FormatError,
   info,
   InvalidPDFException,
@@ -47,16 +48,18 @@ import {
   RefSet,
   RefSetCache,
 } from "./primitives.js";
-import { Lexer, Parser } from "./parser.js";
 import {
+  collectActions,
   MissingDataException,
   toRomanNumerals,
   XRefEntryException,
   XRefParseException,
 } from "./core_utils.js";
+import { Lexer, Parser } from "./parser.js";
 import { CipherTransformFactory } from "./crypto.js";
 import { ColorSpace } from "./colorspace.js";
 import { GlobalImageCache } from "./image_utils.js";
+import { MetadataParser } from "./metadata_parser.js";
 
 function fetchDestination(dest) {
   return isDict(dest) ? dest.get("D") : dest;
@@ -129,20 +132,22 @@ class Catalog {
       this.xref.encrypt && this.xref.encrypt.encryptMetadata
     );
     const stream = this.xref.fetch(streamRef, suppressEncryption);
-    let metadata;
+    let metadata = null;
 
-    if (stream && isDict(stream.dict)) {
+    if (isStream(stream) && isDict(stream.dict)) {
       const type = stream.dict.get("Type");
       const subtype = stream.dict.get("Subtype");
 
       if (isName(type, "Metadata") && isName(subtype, "XML")) {
         // XXX: This should examine the charset the XML document defines,
-        // however since there are currently no real means to decode
-        // arbitrary charsets, let's just hope that the author of the PDF
-        // was reasonable enough to stick with the XML default charset,
-        // which is UTF-8.
+        // however since there are currently no real means to decode arbitrary
+        // charsets, let's just hope that the author of the PDF was reasonable
+        // enough to stick with the XML default charset, which is UTF-8.
         try {
-          metadata = stringToUTF8String(bytesToString(stream.getBytes()));
+          const data = stringToUTF8String(bytesToString(stream.getBytes()));
+          if (data) {
+            metadata = new MetadataParser(data).serializable;
+          }
         } catch (e) {
           if (e instanceof MissingDataException) {
             throw e;
@@ -873,11 +878,11 @@ class Catalog {
     return shadow(this, "attachments", attachments);
   }
 
-  get javaScript() {
+  _collectJavaScript() {
     const obj = this._catDict.get("Names");
 
     let javaScript = null;
-    function appendIfJavaScriptDict(jsDict) {
+    function appendIfJavaScriptDict(name, jsDict) {
       const type = jsDict.get("S");
       if (!isName(type, "JavaScript")) {
         return;
@@ -890,10 +895,10 @@ class Catalog {
         return;
       }
 
-      if (!javaScript) {
-        javaScript = [];
+      if (javaScript === null) {
+        javaScript = Object.create(null);
       }
-      javaScript.push(stringToPDFString(js));
+      javaScript[name] = stringToPDFString(js);
     }
 
     if (obj && obj.has("JavaScript")) {
@@ -904,7 +909,7 @@ class Catalog {
         // defensive so we don't cause errors on document load.
         const jsDict = names[name];
         if (isDict(jsDict)) {
-          appendIfJavaScriptDict(jsDict);
+          appendIfJavaScriptDict(name, jsDict);
         }
       }
     }
@@ -912,10 +917,43 @@ class Catalog {
     // Append OpenAction "JavaScript" actions to the JavaScript array.
     const openAction = this._catDict.get("OpenAction");
     if (isDict(openAction) && isName(openAction.get("S"), "JavaScript")) {
-      appendIfJavaScriptDict(openAction);
+      appendIfJavaScriptDict("OpenAction", openAction);
     }
 
-    return shadow(this, "javaScript", javaScript);
+    return javaScript;
+  }
+
+  get javaScript() {
+    const javaScript = this._collectJavaScript();
+    return shadow(
+      this,
+      "javaScript",
+      javaScript ? Object.values(javaScript) : null
+    );
+  }
+
+  get jsActions() {
+    const js = this._collectJavaScript();
+    let actions = collectActions(
+      this.xref,
+      this._catDict,
+      DocumentActionEventType
+    );
+
+    if (!actions && js) {
+      actions = Object.create(null);
+    }
+    if (actions && js) {
+      for (const [key, val] of Object.entries(js)) {
+        if (key in actions) {
+          actions[key].push(val);
+        } else {
+          actions[key] = [val];
+        }
+      }
+    }
+
+    return shadow(this, "jsActions", actions);
   }
 
   fontFallback(id, handler) {
@@ -1328,7 +1366,16 @@ class Catalog {
           }
         /* falls through */
         default:
-          warn(`parseDestDictionary: unsupported action type "${actionName}".`);
+          if (
+            actionName === "JavaScript" ||
+            actionName === "ResetForm" ||
+            actionName === "SubmitForm"
+          ) {
+            // Don't bother the user with a warning for actions that require
+            // scripting support, since those will be handled separately.
+            break;
+          }
+          warn(`parseDestDictionary - unsupported action: "${actionName}".`);
           break;
       }
     } else if (destDict.has("Dest")) {
@@ -1836,14 +1883,13 @@ var XRef = (function XRefClosure() {
         }
       }
       // reading XRef streams
-      var i, ii;
-      for (i = 0, ii = xrefStms.length; i < ii; ++i) {
+      for (let i = 0, ii = xrefStms.length; i < ii; ++i) {
         this.startXRefQueue.push(xrefStms[i]);
         this.readXRef(/* recoveryMode */ true);
       }
       // finding main trailer
       let trailerDict;
-      for (i = 0, ii = trailers.length; i < ii; ++i) {
+      for (let i = 0, ii = trailers.length; i < ii; ++i) {
         stream.pos = trailers[i];
         const parser = new Parser({
           lexer: new Lexer(stream),
@@ -1861,16 +1907,21 @@ var XRef = (function XRefClosure() {
           continue;
         }
         // Do some basic validation of the trailer/root dictionary candidate.
-        let rootDict;
         try {
-          rootDict = dict.get("Root");
-        } catch (ex) {
-          if (ex instanceof MissingDataException) {
-            throw ex;
+          const rootDict = dict.get("Root");
+          if (!(rootDict instanceof Dict)) {
+            continue;
           }
-          continue;
-        }
-        if (!isDict(rootDict) || !rootDict.has("Pages")) {
+          const pagesDict = rootDict.get("Pages");
+          if (!(pagesDict instanceof Dict)) {
+            continue;
+          }
+          const pagesCount = pagesDict.get("Count");
+          if (!Number.isInteger(pagesCount)) {
+            continue;
+          }
+          // The top-level /Pages dictionary isn't obviously corrupt.
+        } catch (ex) {
           continue;
         }
         // taking the first one with 'ID'
@@ -2514,7 +2565,11 @@ const ObjectLoader = (function () {
             currentNode = this.xref.fetch(currentNode);
           } catch (ex) {
             if (!(ex instanceof MissingDataException)) {
-              throw ex;
+              warn(`ObjectLoader._walk - requesting all data: "${ex}".`);
+              this.refSet = null;
+
+              const { manager } = this.xref.stream;
+              return manager.requestAllChunks();
             }
             nodesToRevisit.push(currentNode);
             pendingRequests.push({ begin: ex.begin, end: ex.end });
@@ -2560,4 +2615,4 @@ const ObjectLoader = (function () {
   return ObjectLoader;
 })();
 
-export { Catalog, ObjectLoader, XRef, FileSpec };
+export { Catalog, FileSpec, ObjectLoader, XRef };

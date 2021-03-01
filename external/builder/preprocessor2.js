@@ -8,7 +8,7 @@ var path = require("path");
 
 var PDFJS_PREPROCESSOR_NAME = "PDFJSDev";
 var ROOT_PREFIX = "$ROOT/";
-const ACORN_ECMA_VERSION = 2020;
+const ACORN_ECMA_VERSION = 2021;
 
 function isLiteral(obj, value) {
   return obj.type === "Literal" && obj.value === value;
@@ -35,7 +35,7 @@ function handlePreprocessorAction(ctx, actionName, args, loc) {
           throw new Error("No code for testing is given");
         }
         var isTrue = !!evalWithDefines(arg.value, ctx.defines);
-        return { type: "Literal", value: isTrue, loc: loc };
+        return { type: "Literal", value: isTrue, loc };
       case "eval":
         arg = args[0];
         if (!arg || arg.type !== "Literal" || typeof arg.value !== "string") {
@@ -47,7 +47,7 @@ function handlePreprocessorAction(ctx, actionName, args, loc) {
           typeof result === "string" ||
           typeof result === "number"
         ) {
-          return { type: "Literal", value: result, loc: loc };
+          return { type: "Literal", value: result, loc };
         }
         if (typeof result === "object") {
           const parsedObj = acorn.parse("(" + JSON.stringify(result) + ")", {
@@ -333,8 +333,8 @@ function preprocessPDFJSCode(ctx, code) {
     sourceType: "module",
   };
   var codegenOptions = {
-    format: format,
-    parse: function (input) {
+    format,
+    parse(input) {
       return acorn.parse(input, { ecmaVersion: ACORN_ECMA_VERSION });
     },
     sourceMap: ctx.sourceMap,

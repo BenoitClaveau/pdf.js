@@ -77,6 +77,10 @@ const DEFAULT_CACHE_SIZE = 10;
  *   total pixels, i.e. width * height. Use -1 for no limit. The default value
  *   is 4096 * 4096 (16 mega-pixels).
  * @property {IL10n} l10n - Localization service.
+ * @property {boolean} [enableScripting] - Enable embedded script execution.
+ *   The default value is `false`.
+ * @property {Object} [mouseState] - The mouse button state. The default value
+ *   is `null`.
  */
 
 function PDFPageViewBuffer(size) {
@@ -112,6 +116,10 @@ function PDFPageViewBuffer(size) {
     while (data.length > size) {
       data.shift().destroy();
     }
+  };
+
+  this.has = function (view) {
+    return data.includes(view);
   };
 }
 
@@ -164,7 +172,10 @@ class BaseViewer {
         throw new Error("Invalid `container` and/or `viewer` option.");
       }
 
-      if (getComputedStyle(this.container).position !== "absolute") {
+      if (
+        this.container.offsetParent &&
+        getComputedStyle(this.container).position !== "absolute"
+      ) {
         throw new Error("The `container` must be absolutely positioned.");
       }
     }
@@ -177,16 +188,15 @@ class BaseViewer {
       ? options.textLayerMode
       : TextLayerMode.ENABLE;
     this.imageResourcesPath = options.imageResourcesPath || "";
-    this.renderInteractiveForms =
-      typeof options.renderInteractiveForms === "boolean"
-        ? options.renderInteractiveForms
-        : true;
+    this.renderInteractiveForms = options.renderInteractiveForms !== false;
     this.enablePrintAutoRotate = options.enablePrintAutoRotate || false;
     this.renderer = options.renderer || RendererType.CANVAS;
     this.enableWebGL = options.enableWebGL || false;
     this.useOnlyCssZoom = options.useOnlyCssZoom || false;
     this.maxCanvasPixels = options.maxCanvasPixels;
     this.l10n = options.l10n || NullL10n;
+    this.enableScripting = options.enableScripting || false;
+    this._mouseState = options.mouseState || null;
 
     this.defaultRenderingQueue = !options.renderingQueue;
     if (this.defaultRenderingQueue) {
@@ -230,7 +240,7 @@ class BaseViewer {
     // Prevent printing errors when 'disableAutoFetch' is set, by ensuring
     // that *all* pages have in fact been completely loaded.
     return this._pages.every(function (pageView) {
-      return pageView && pageView.pdfPage;
+      return pageView?.pdfPage;
     });
   }
 
@@ -274,12 +284,14 @@ class BaseViewer {
     if (!(0 < val && val <= this.pagesCount)) {
       return false;
     }
+    const previous = this._currentPageNumber;
     this._currentPageNumber = val;
 
     this.eventBus.dispatch("pagechanging", {
       source: this,
       pageNumber: val,
-      pageLabel: this._pageLabels && this._pageLabels[val - 1],
+      pageLabel: this._pageLabels?.[val - 1] ?? null,
+      previous,
     });
 
     if (resetCurrentPageView) {
@@ -293,7 +305,7 @@ class BaseViewer {
    *   labels exist.
    */
   get currentPageLabel() {
-    return this._pageLabels && this._pageLabels[this._currentPageNumber - 1];
+    return this._pageLabels?.[this._currentPageNumber - 1] ?? null;
   }
 
   /**
@@ -448,6 +460,8 @@ class BaseViewer {
    */
   setDocument(pdfDocument) {
     if (this.pdfDocument) {
+      this.eventBus.dispatch("pagesdestroy", { source: this });
+
       this._cancelRendering();
       this._resetView();
 
@@ -462,8 +476,7 @@ class BaseViewer {
     }
     const pagesCount = pdfDocument.numPages;
     const firstPagePromise = pdfDocument.getPage(1);
-
-    const annotationStorage = pdfDocument.annotationStorage;
+    // Rendering (potentially) depends on this, hence fetching it immediately.
     const optionalContentConfigPromise = pdfDocument.getOptionalContentConfig();
 
     this._pagesCapability.promise.then(() => {
@@ -514,7 +527,6 @@ class BaseViewer {
             id: pageNum,
             scale,
             defaultViewport: viewport.clone(),
-            annotationStorage,
             optionalContentConfigPromise,
             renderingQueue: this.renderingQueue,
             textLayerFactory,
@@ -527,6 +539,7 @@ class BaseViewer {
             useOnlyCssZoom: this.useOnlyCssZoom,
             maxCanvasPixels: this.maxCanvasPixels,
             l10n: this.l10n,
+            enableScripting: this.enableScripting,
           });
           this._pages.push(pageView);
         }
@@ -618,9 +631,7 @@ class BaseViewer {
     }
     // Update all the `PDFPageView` instances.
     for (let i = 0, ii = this._pages.length; i < ii; i++) {
-      const pageView = this._pages[i];
-      const label = this._pageLabels && this._pageLabels[i];
-      pageView.setPageLabel(label);
+      this._pages[i].setPageLabel(this._pageLabels?.[i] ?? null);
     }
   }
 
@@ -649,6 +660,8 @@ class BaseViewer {
       this.eventBus._off("pagerendered", this._onAfterDraw);
       this._onAfterDraw = null;
     }
+    this._resetScriptingEvents();
+
     // Remove the pages from the DOM...
     this.viewer.textContent = "";
     // ... and reset the Scroll mode CSS class(es) afterwards.
@@ -719,6 +732,20 @@ class BaseViewer {
     }
   }
 
+  /**
+   * @private
+   */
+  get _pageWidthScaleFactor() {
+    if (
+      this._spreadMode !== SpreadMode.NONE &&
+      this._scrollMode !== ScrollMode.HORIZONTAL &&
+      !this.isInPresentationMode
+    ) {
+      return 2;
+    }
+    return 1;
+  }
+
   _setScale(value, noScroll = false) {
     let scale = parseFloat(value);
 
@@ -737,8 +764,9 @@ class BaseViewer {
         [hPadding, vPadding] = [vPadding, hPadding]; // Swap the padding values.
       }
       const pageWidthScale =
-        ((this.container.clientWidth - hPadding) / currentPage.width) *
-        currentPage.scale;
+        (((this.container.clientWidth - hPadding) / currentPage.width) *
+          currentPage.scale) /
+        this._pageWidthScaleFactor;
       const pageHeightScale =
         ((this.container.clientHeight - vPadding) / currentPage.height) *
         currentPage.scale;
@@ -1092,15 +1120,47 @@ class BaseViewer {
     if (!this.pdfDocument) {
       return false;
     }
-    if (pageNumber < 1 || pageNumber > this.pagesCount) {
+    if (
+      !(
+        Number.isInteger(pageNumber) &&
+        pageNumber > 0 &&
+        pageNumber <= this.pagesCount
+      )
+    ) {
       console.error(
-        `${this._name}.isPageVisible: "${pageNumber}" is out of bounds.`
+        `${this._name}.isPageVisible: "${pageNumber}" is not a valid page.`
       );
       return false;
     }
     return this._getVisiblePages().views.some(function (view) {
       return view.id === pageNumber;
     });
+  }
+
+  /**
+   * @param {number} pageNumber
+   */
+  isPageCached(pageNumber) {
+    if (!this.pdfDocument || !this._buffer) {
+      return false;
+    }
+    if (
+      !(
+        Number.isInteger(pageNumber) &&
+        pageNumber > 0 &&
+        pageNumber <= this.pagesCount
+      )
+    ) {
+      console.error(
+        `${this._name}.isPageCached: "${pageNumber}" is not a valid page.`
+      );
+      return false;
+    }
+    const pageView = this._pages[pageNumber - 1];
+    if (!pageView) {
+      return false;
+    }
+    return this._buffer.has(pageView);
   }
 
   cleanup() {
@@ -1204,10 +1264,15 @@ class BaseViewer {
   /**
    * @param {HTMLDivElement} pageDiv
    * @param {PDFPage} pdfPage
+   * @param {AnnotationStorage} [annotationStorage] - Storage for annotation
+   *   data in forms.
    * @param {string} [imageResourcesPath] - Path for image resources, mainly
    *   for annotation icons. Include trailing slash.
    * @param {boolean} renderInteractiveForms
    * @param {IL10n} l10n
+   * @param {boolean} [enableScripting]
+   * @param {Promise<boolean>} [hasJSActionsPromise]
+   * @param {Object} [mouseState]
    * @returns {AnnotationLayerBuilder}
    */
   createAnnotationLayerBuilder(
@@ -1216,17 +1281,25 @@ class BaseViewer {
     annotationStorage = null,
     imageResourcesPath = "",
     renderInteractiveForms = false,
-    l10n = NullL10n
+    l10n = NullL10n,
+    enableScripting = false,
+    hasJSActionsPromise = null,
+    mouseState = null
   ) {
     return new AnnotationLayerBuilder({
       pageDiv,
       pdfPage,
-      annotationStorage,
+      annotationStorage:
+        annotationStorage || this.pdfDocument?.annotationStorage,
       imageResourcesPath,
       renderInteractiveForms,
       linkService: this.linkService,
       downloadManager: this.downloadManager,
       l10n,
+      enableScripting,
+      hasJSActionsPromise:
+        hasJSActionsPromise || this.pdfDocument?.hasJSActions(),
+      mouseState: mouseState || this._mouseState,
     });
   }
 
@@ -1425,8 +1498,226 @@ class BaseViewer {
     if (!pageNumber) {
       return;
     }
+    if (this._currentScaleValue && isNaN(this._currentScaleValue)) {
+      this._setScale(this._currentScaleValue, true);
+    }
     this._setCurrentPageNumber(pageNumber, /* resetCurrentPageView = */ true);
     this.update();
+  }
+
+  /**
+   * @private
+   */
+  _getPageAdvance(currentPageNumber, previous = false) {
+    if (this.isInPresentationMode) {
+      return 1;
+    }
+    switch (this._scrollMode) {
+      case ScrollMode.WRAPPED: {
+        const { views } = this._getVisiblePages(),
+          pageLayout = new Map();
+
+        // Determine the current (visible) page layout.
+        for (const { id, y, percent, widthPercent } of views) {
+          if (percent === 0 || widthPercent < 100) {
+            continue;
+          }
+          let yArray = pageLayout.get(y);
+          if (!yArray) {
+            pageLayout.set(y, (yArray ||= []));
+          }
+          yArray.push(id);
+        }
+        // Find the row of the current page.
+        for (const yArray of pageLayout.values()) {
+          const currentIndex = yArray.indexOf(currentPageNumber);
+          if (currentIndex === -1) {
+            continue;
+          }
+          const numPages = yArray.length;
+          if (numPages === 1) {
+            break;
+          }
+          // Handle documents with varying page sizes.
+          if (previous) {
+            for (let i = currentIndex - 1, ii = 0; i >= ii; i--) {
+              const currentId = yArray[i],
+                expectedId = yArray[i + 1] - 1;
+              if (currentId < expectedId) {
+                return currentPageNumber - expectedId;
+              }
+            }
+          } else {
+            for (let i = currentIndex + 1, ii = numPages; i < ii; i++) {
+              const currentId = yArray[i],
+                expectedId = yArray[i - 1] + 1;
+              if (currentId > expectedId) {
+                return expectedId - currentPageNumber;
+              }
+            }
+          }
+          // The current row is "complete", advance to the previous/next one.
+          if (previous) {
+            const firstId = yArray[0];
+            if (firstId < currentPageNumber) {
+              return currentPageNumber - firstId + 1;
+            }
+          } else {
+            const lastId = yArray[numPages - 1];
+            if (lastId > currentPageNumber) {
+              return lastId - currentPageNumber + 1;
+            }
+          }
+          break;
+        }
+        break;
+      }
+      case ScrollMode.HORIZONTAL: {
+        break;
+      }
+      case ScrollMode.VERTICAL: {
+        if (this._spreadMode === SpreadMode.NONE) {
+          break; // Normal vertical scrolling.
+        }
+        const parity = this._spreadMode - 1;
+
+        if (previous && currentPageNumber % 2 !== parity) {
+          break; // Left-hand side page.
+        } else if (!previous && currentPageNumber % 2 === parity) {
+          break; // Right-hand side page.
+        }
+        const { views } = this._getVisiblePages(),
+          expectedId = previous ? currentPageNumber - 1 : currentPageNumber + 1;
+
+        for (const { id, percent, widthPercent } of views) {
+          if (id !== expectedId) {
+            continue;
+          }
+          if (percent > 0 && widthPercent === 100) {
+            return 2;
+          }
+          break;
+        }
+        break;
+      }
+    }
+    return 1;
+  }
+
+  /**
+   * Go to the next page, taking scroll/spread-modes into account.
+   * @returns {boolean} Whether navigation occured.
+   */
+  nextPage() {
+    const currentPageNumber = this._currentPageNumber,
+      pagesCount = this.pagesCount;
+
+    if (currentPageNumber >= pagesCount) {
+      return false;
+    }
+    const advance =
+      this._getPageAdvance(currentPageNumber, /* previous = */ false) || 1;
+
+    this.currentPageNumber = Math.min(currentPageNumber + advance, pagesCount);
+    return true;
+  }
+
+  /**
+   * Go to the previous page, taking scroll/spread-modes into account.
+   * @returns {boolean} Whether navigation occured.
+   */
+  previousPage() {
+    const currentPageNumber = this._currentPageNumber;
+
+    if (currentPageNumber <= 1) {
+      return false;
+    }
+    const advance =
+      this._getPageAdvance(currentPageNumber, /* previous = */ true) || 1;
+
+    this.currentPageNumber = Math.max(currentPageNumber - advance, 1);
+    return true;
+  }
+
+  async initializeScriptingEvents() {
+    if (!this.enableScripting || this._pageOpenPendingSet) {
+      return;
+    }
+    const eventBus = this.eventBus,
+      pageOpenPendingSet = (this._pageOpenPendingSet = new Set()),
+      scriptingEvents = (this._scriptingEvents ||= Object.create(null));
+
+    const dispatchPageClose = pageNumber => {
+      if (pageOpenPendingSet.has(pageNumber)) {
+        return; // No "pageopen" event was dispatched for the previous page.
+      }
+      eventBus.dispatch("pageclose", { source: this, pageNumber });
+    };
+    const dispatchPageOpen = pageNumber => {
+      const pageView = this._pages[pageNumber - 1];
+      if (pageView?.renderingState === RenderingStates.FINISHED) {
+        pageOpenPendingSet.delete(pageNumber);
+
+        eventBus.dispatch("pageopen", {
+          source: this,
+          pageNumber,
+          actionsPromise: pageView.pdfPage?.getJSActions(),
+        });
+      } else {
+        pageOpenPendingSet.add(pageNumber);
+      }
+    };
+
+    scriptingEvents.onPageChanging = ({ pageNumber, previous }) => {
+      if (pageNumber === previous) {
+        return; // The active page didn't change.
+      }
+      dispatchPageClose(previous);
+      dispatchPageOpen(pageNumber);
+    };
+    eventBus._on("pagechanging", scriptingEvents.onPageChanging);
+
+    scriptingEvents.onPageRendered = ({ pageNumber }) => {
+      if (!pageOpenPendingSet.has(pageNumber)) {
+        return; // No pending "pageopen" event for the newly rendered page.
+      }
+      if (pageNumber !== this._currentPageNumber) {
+        return; // The newly rendered page is no longer the current one.
+      }
+      dispatchPageOpen(pageNumber);
+    };
+    eventBus._on("pagerendered", scriptingEvents.onPageRendered);
+
+    scriptingEvents.onPagesDestroy = () => {
+      dispatchPageClose(this._currentPageNumber);
+    };
+    eventBus._on("pagesdestroy", scriptingEvents.onPagesDestroy);
+
+    // Ensure that a "pageopen" event is dispatched for the initial page.
+    dispatchPageOpen(this._currentPageNumber);
+  }
+
+  /**
+   * @private
+   */
+  _resetScriptingEvents() {
+    if (!this.enableScripting || !this._pageOpenPendingSet) {
+      return;
+    }
+    const eventBus = this.eventBus,
+      scriptingEvents = this._scriptingEvents;
+
+    // Remove the event listeners.
+    eventBus._off("pagechanging", scriptingEvents.onPageChanging);
+    scriptingEvents.onPageChanging = null;
+
+    eventBus._off("pagerendered", scriptingEvents.onPageRendered);
+    scriptingEvents.onPageRendered = null;
+
+    eventBus._off("pagesdestroy", scriptingEvents.onPagesDestroy);
+    scriptingEvents.onPagesDestroy = null;
+
+    this._pageOpenPendingSet = null;
   }
 }
 

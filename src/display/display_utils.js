@@ -451,6 +451,10 @@ function addLinkAttributes(link, { url, target, rel, enabled = true } = {}) {
   link.rel = typeof rel === "string" ? rel : DEFAULT_LINK_REL;
 }
 
+function isPdfFile(filename) {
+  return typeof filename === "string" && /\.pdf$/i.test(filename);
+}
+
 /**
  * Gets the file name from a given URL.
  * @param {string} url
@@ -530,14 +534,20 @@ function isValidFetchUrl(url, baseUrl) {
 
 /**
  * @param {string} src
+ * @param {boolean} [removeScriptElement]
  * @returns {Promise<void>}
  */
-function loadScript(src) {
+function loadScript(src, removeScriptElement = false) {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = src;
 
-    script.onload = resolve;
+    script.onload = function (evt) {
+      if (removeScriptElement) {
+        script.remove();
+      }
+      resolve(evt);
+    };
     script.onerror = function () {
       reject(new Error(`Cannot load script at: ${script.src}`));
     };
@@ -636,21 +646,22 @@ class PDFDateString {
 }
 
 export {
-  PageViewport,
-  RenderingCancelledException,
   addLinkAttributes,
-  getFilenameFromUrl,
-  LinkTarget,
-  DEFAULT_LINK_REL,
   BaseCanvasFactory,
-  DOMCanvasFactory,
   BaseCMapReaderFactory,
+  DEFAULT_LINK_REL,
+  deprecated,
+  DOMCanvasFactory,
   DOMCMapReaderFactory,
   DOMSVGFactory,
-  StatTimer,
+  getFilenameFromUrl,
   isFetchSupported,
+  isPdfFile,
   isValidFetchUrl,
+  LinkTarget,
   loadScript,
-  deprecated,
+  PageViewport,
   PDFDateString,
+  RenderingCancelledException,
+  StatTimer,
 };

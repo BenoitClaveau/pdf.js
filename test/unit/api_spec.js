@@ -15,8 +15,7 @@
 
 import {
   buildGetDocumentParams,
-  DOMFileReaderFactory,
-  NodeFileReaderFactory,
+  DefaultFileReaderFactory,
   TEST_PDFS_PATH,
 } from "./test_utils.js";
 import {
@@ -32,23 +31,22 @@ import {
   StreamType,
 } from "../../src/shared/util.js";
 import {
-  DOMCanvasFactory,
-  RenderingCancelledException,
-  StatTimer,
-} from "../../src/display/display_utils.js";
-import {
+  DefaultCanvasFactory,
   getDocument,
   PDFDataRangeTransport,
   PDFDocumentProxy,
   PDFPageProxy,
   PDFWorker,
 } from "../../src/display/api.js";
+import {
+  RenderingCancelledException,
+  StatTimer,
+} from "../../src/display/display_utils.js";
 import { AutoPrintRegExp } from "../../web/ui_utils.js";
 import { GlobalImageCache } from "../../src/core/image_utils.js";
 import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
 import { isNodeJS } from "../../src/shared/is_node.js";
 import { Metadata } from "../../src/display/metadata.js";
-import { NodeCanvasFactory } from "../../src/display/node_utils.js";
 
 describe("api", function () {
   const basicApiFileName = "basicapi.pdf";
@@ -58,11 +56,7 @@ describe("api", function () {
   let CanvasFactory;
 
   beforeAll(function (done) {
-    if (isNodeJS) {
-      CanvasFactory = new NodeCanvasFactory();
-    } else {
-      CanvasFactory = new DOMCanvasFactory();
-    }
+    CanvasFactory = new DefaultCanvasFactory();
     done();
   });
 
@@ -132,16 +126,9 @@ describe("api", function () {
         .catch(done.fail);
     });
     it("creates pdf doc from typed array", function (done) {
-      let typedArrayPdfPromise;
-      if (isNodeJS) {
-        typedArrayPdfPromise = NodeFileReaderFactory.fetch({
-          path: TEST_PDFS_PATH.node + basicApiFileName,
-        });
-      } else {
-        typedArrayPdfPromise = DOMFileReaderFactory.fetch({
-          path: TEST_PDFS_PATH.dom + basicApiFileName,
-        });
-      }
+      const typedArrayPdfPromise = DefaultFileReaderFactory.fetch({
+        path: TEST_PDFS_PATH + basicApiFileName,
+      });
 
       typedArrayPdfPromise
         .then(typedArrayPdf => {
@@ -995,6 +982,50 @@ describe("api", function () {
         .catch(done.fail);
     });
 
+    it("gets JSActions (none)", function (done) {
+      const promise = pdfDocument.getJSActions();
+      promise
+        .then(function (data) {
+          expect(data).toEqual(null);
+          done();
+        })
+        .catch(done.fail);
+    });
+    it("gets JSActions", function (done) {
+      // PDF document with "JavaScript" action in the OpenAction dictionary.
+      const loadingTask = getDocument(
+        buildGetDocumentParams("doc_actions.pdf")
+      );
+      const promise = loadingTask.promise.then(async pdfDoc => {
+        const docActions = await pdfDoc.getJSActions();
+        const page1 = await pdfDoc.getPage(1);
+        const page3 = await pdfDoc.getPage(3);
+        const page1Actions = await page1.getJSActions();
+        const page3Actions = await page3.getJSActions();
+        return [docActions, page1Actions, page3Actions];
+      });
+      promise
+        .then(async ([docActions, page1Actions, page3Actions]) => {
+          expect(docActions).toEqual({
+            DidPrint: [`this.getField("Text2").value = "DidPrint";`],
+            DidSave: [`this.getField("Text2").value = "DidSave";`],
+            WillClose: [`this.getField("Text1").value = "WillClose";`],
+            WillPrint: [`this.getField("Text1").value = "WillPrint";`],
+            WillSave: [`this.getField("Text1").value = "WillSave";`],
+          });
+          expect(page1Actions).toEqual({
+            PageOpen: [`this.getField("Text1").value = "PageOpen 1";`],
+            PageClose: [`this.getField("Text2").value = "PageClose 1";`],
+          });
+          expect(page3Actions).toEqual({
+            PageOpen: [`this.getField("Text5").value = "PageOpen 3";`],
+            PageClose: [`this.getField("Text6").value = "PageClose 3";`],
+          });
+          loadingTask.destroy().then(done);
+        })
+        .catch(done.fail);
+    });
+
     it("gets non-existent outline", function (done) {
       const loadingTask = getDocument(
         buildGetDocumentParams("tracemonkey.pdf")
@@ -1132,7 +1163,12 @@ describe("api", function () {
     it("gets metadata", function (done) {
       const promise = pdfDocument.getMetadata();
       promise
-        .then(function ({ info, metadata, contentDispositionFilename }) {
+        .then(function ({
+          info,
+          metadata,
+          contentDispositionFilename,
+          contentLength,
+        }) {
           expect(info.Title).toEqual("Basic API Test");
           // Custom, non-standard, information dictionary entries.
           expect(info.Custom).toEqual(undefined);
@@ -1147,6 +1183,7 @@ describe("api", function () {
           expect(metadata.get("dc:title")).toEqual("Basic API Test");
 
           expect(contentDispositionFilename).toEqual(null);
+          expect(contentLength).toEqual(basicApiFileLength);
           done();
         })
         .catch(done.fail);
@@ -1160,7 +1197,12 @@ describe("api", function () {
         .then(function (pdfDoc) {
           return pdfDoc.getMetadata();
         })
-        .then(function ({ info, metadata, contentDispositionFilename }) {
+        .then(function ({
+          info,
+          metadata,
+          contentDispositionFilename,
+          contentLength,
+        }) {
           expect(info.Creator).toEqual("TeX");
           expect(info.Producer).toEqual("pdfeTeX-1.21a");
           expect(info.CreationDate).toEqual("D:20090401163925-07'00'");
@@ -1181,6 +1223,7 @@ describe("api", function () {
 
           expect(metadata).toEqual(null);
           expect(contentDispositionFilename).toEqual(null);
+          expect(contentLength).toEqual(1016315);
 
           loadingTask.destroy().then(done);
         })
@@ -1193,7 +1236,12 @@ describe("api", function () {
         .then(function (pdfDoc) {
           return pdfDoc.getMetadata();
         })
-        .then(function ({ info, metadata, contentDispositionFilename }) {
+        .then(function ({
+          info,
+          metadata,
+          contentDispositionFilename,
+          contentLength,
+        }) {
           // The following are PDF.js specific, non-standard, properties.
           expect(info.PDFFormatVersion).toEqual(null);
           expect(info.IsLinearized).toEqual(false);
@@ -1203,6 +1251,7 @@ describe("api", function () {
 
           expect(metadata).toEqual(null);
           expect(contentDispositionFilename).toEqual(null);
+          expect(contentLength).toEqual(624);
 
           loadingTask.destroy().then(done);
         })
@@ -2135,15 +2184,9 @@ describe("api", function () {
 
     beforeAll(function (done) {
       const fileName = "tracemonkey.pdf";
-      if (isNodeJS) {
-        dataPromise = NodeFileReaderFactory.fetch({
-          path: TEST_PDFS_PATH.node + fileName,
-        });
-      } else {
-        dataPromise = DOMFileReaderFactory.fetch({
-          path: TEST_PDFS_PATH.dom + fileName,
-        });
-      }
+      dataPromise = DefaultFileReaderFactory.fetch({
+        path: TEST_PDFS_PATH + fileName,
+      });
       done();
     });
 

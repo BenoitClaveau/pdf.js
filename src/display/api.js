@@ -335,6 +335,7 @@ function getDocument(src) {
               length: params.length,
               initialData: params.initialData,
               progressiveDone: params.progressiveDone,
+              contentDispositionFilename: params.contentDispositionFilename,
               disableRange: params.disableRange,
               disableStream: params.disableStream,
             },
@@ -402,6 +403,8 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
     source.length = pdfDataRangeTransport.length;
     source.initialData = pdfDataRangeTransport.initialData;
     source.progressiveDone = pdfDataRangeTransport.progressiveDone;
+    source.contentDispositionFilename =
+      pdfDataRangeTransport.contentDispositionFilename;
   }
   return worker.messageHandler
     .sendWithPromise("GetDocRequest", {
@@ -555,11 +558,18 @@ class PDFDataRangeTransport {
    * @param {number} length
    * @param {Uint8Array} initialData
    * @param {boolean} [progressiveDone]
+   * @param {string} [contentDispositionFilename]
    */
-  constructor(length, initialData, progressiveDone = false) {
+  constructor(
+    length,
+    initialData,
+    progressiveDone = false,
+    contentDispositionFilename = null
+  ) {
     this.length = length;
     this.initialData = initialData;
     this.progressiveDone = progressiveDone;
+    this.contentDispositionFilename = contentDispositionFilename;
 
     this._rangeListeners = [];
     this._progressListeners = [];
@@ -755,6 +765,17 @@ class PDFDocumentProxy {
   }
 
   /**
+   * @returns {Promise<Object | null>} A promise that is resolved with
+   *   an {Object} with the JavaScript actions:
+   *     - from the name tree (like getJavaScript);
+   *     - from A or AA entries in the catalog dictionary.
+   *   , or `null` if no JavaScript exists.
+   */
+  getJSActions() {
+    return this._transport.getDocJSActions();
+  }
+
+  /**
    * @typedef {Object} OutlineNode
    * @property {string} title
    * @property {boolean} bold
@@ -902,6 +923,14 @@ class PDFDocumentProxy {
    */
   getFieldObjects() {
     return this._transport.getFieldObjects();
+  }
+
+  /**
+   * @returns {Promise<boolean>} A promise that is resolved with `true`
+   *   if some /AcroForm fields have JavaScript actions.
+   */
+  hasJSActions() {
+    return this._transport.hasJSActions();
   }
 
   /**
@@ -1118,6 +1147,16 @@ class PDFPageProxy {
   }
 
   /**
+   * @returns {Promise<Object>} A promise that is resolved with an
+   *   {Object} with JS actions.
+   */
+  getJSActions() {
+    return (this._jsActionsPromise ||= this._transport.getPageJSActions(
+      this._pageIndex
+    ));
+  }
+
+  /**
    * Begins the process of rendering a page to the desired context.
    *
    * @param {RenderParameters} params Page render parameters.
@@ -1190,7 +1229,7 @@ class PDFPageProxy {
         pageIndex: this._pageIndex,
         intent: renderingIntent,
         renderInteractiveForms: renderInteractiveForms === true,
-        annotationStorage: annotationStorage?.getAll() || null,
+        annotationStorage: annotationStorage?.serializable || null,
       });
     }
 
@@ -1403,6 +1442,7 @@ class PDFPageProxy {
     }
     this.objs.clear();
     this.annotationsPromise = null;
+    this._jsActionsPromise = null;
     this.pendingCleanup = false;
     return Promise.all(waitOn);
   }
@@ -1436,6 +1476,7 @@ class PDFPageProxy {
     this._intentStates.clear();
     this.objs.clear();
     this.annotationsPromise = null;
+    this._jsActionsPromise = null;
     if (resetStats && this._stats) {
       this._stats = new StatTimer();
     }
@@ -1572,9 +1613,7 @@ class PDFPageProxy {
         return;
       }
     }
-    intentState.streamReader.cancel(
-      new AbortException(reason && reason.message)
-    );
+    intentState.streamReader.cancel(new AbortException(reason?.message));
     intentState.streamReader = null;
 
     if (this._transport.destroyed) {
@@ -1601,9 +1640,8 @@ class PDFPageProxy {
 }
 
 class LoopbackPort {
-  constructor(defer = true) {
+  constructor() {
     this._listeners = [];
-    this._defer = defer;
     this._deferred = Promise.resolve(undefined);
   }
 
@@ -1621,8 +1659,7 @@ class LoopbackPort {
       let buffer, result;
       if ((buffer = value.buffer) && isArrayBuffer(buffer)) {
         // We found object with ArrayBuffer (typed array).
-        const transferable = transfers && transfers.includes(buffer);
-        if (transferable) {
+        if (transfers?.includes(buffer)) {
           result = new value.constructor(
             buffer,
             value.byteOffset,
@@ -1634,8 +1671,24 @@ class LoopbackPort {
         cloned.set(value, result);
         return result;
       }
+      if (value instanceof Map) {
+        result = new Map();
+        cloned.set(value, result); // Adding to cache now for cyclic references.
+        for (const [key, val] of value) {
+          result.set(key, cloneValue(val));
+        }
+        return result;
+      }
+      if (value instanceof Set) {
+        result = new Set();
+        cloned.set(value, result); // Adding to cache now for cyclic references.
+        for (const val of value) {
+          result.add(cloneValue(val));
+        }
+        return result;
+      }
       result = Array.isArray(value) ? [] : {};
-      cloned.set(value, result); // adding to cache now for cyclic references
+      cloned.set(value, result); // Adding to cache now for cyclic references.
       // Cloning all value and object properties, however ignoring properties
       // defined via getter.
       for (const i in value) {
@@ -1648,7 +1701,7 @@ class LoopbackPort {
           continue;
         }
         if (typeof desc.value === "function") {
-          if (value.hasOwnProperty && value.hasOwnProperty(i)) {
+          if (value.hasOwnProperty?.(i)) {
             throw new Error(
               `LoopbackPort.postMessage - cannot clone: ${value[i]}`
             );
@@ -1660,19 +1713,13 @@ class LoopbackPort {
       return result;
     }
 
-    if (!this._defer) {
-      this._listeners.forEach(listener => {
-        listener.call(this, { data: obj });
-      });
-      return;
-    }
-
     const cloned = new WeakMap();
-    const e = { data: cloneValue(obj) };
+    const event = { data: cloneValue(obj) };
+
     this._deferred.then(() => {
-      this._listeners.forEach(listener => {
-        listener.call(this, e);
-      });
+      for (const listener of this._listeners) {
+        listener.call(this, event);
+      }
     });
   }
 
@@ -1718,8 +1765,7 @@ const PDFWorker = (function PDFWorkerClosure() {
         fallbackWorkerSrc = "./pdf.worker.js";
       }
     } else if (typeof document === "object" && "currentScript" in document) {
-      const pdfjsFilePath =
-        document.currentScript && document.currentScript.src;
+      const pdfjsFilePath = document.currentScript?.src;
       if (pdfjsFilePath) {
         fallbackWorkerSrc = pdfjsFilePath.replace(
           /(\.(?:min\.)?js)(\?.*)?$/i,
@@ -1745,8 +1791,7 @@ const PDFWorker = (function PDFWorkerClosure() {
   function getMainThreadWorkerMessageHandler() {
     let mainWorkerMessageHandler;
     try {
-      mainWorkerMessageHandler =
-        globalThis.pdfjsWorker && globalThis.pdfjsWorker.WorkerMessageHandler;
+      mainWorkerMessageHandler = globalThis.pdfjsWorker?.WorkerMessageHandler;
     } catch (ex) {
       /* Ignore errors. */
     }
@@ -2103,6 +2148,10 @@ class WorkerTransport {
     this.setupMessageHandler();
   }
 
+  get loadingTaskSettled() {
+    return this.loadingTask._capability.settled;
+  }
+
   destroy() {
     if (this.destroyCapability) {
       return this.destroyCapability.promise;
@@ -2130,8 +2179,23 @@ class WorkerTransport {
     // We also need to wait for the worker to finish its long running tasks.
     const terminated = this.messageHandler.sendWithPromise("Terminate", null);
     waitOn.push(terminated);
+    // Allow `AnnotationStorage`-related clean-up when destroying the document.
+    if (this.loadingTaskSettled) {
+      const annotationStorageResetModified = this.loadingTask.promise
+        .then(pdfDocument => {
+          // Avoid initializing the `annotationStorage` if it doesn't exist.
+          if (pdfDocument.hasOwnProperty("annotationStorage")) {
+            pdfDocument.annotationStorage.resetModified();
+          }
+        })
+        .catch(() => {});
+      waitOn.push(annotationStorageResetModified);
+    }
     Promise.all(waitOn).then(() => {
+      this.commonObjs.clear();
       this.fontLoader.clear();
+      this._hasJSActionsPromise = null;
+
       if (this._networkStream) {
         this._networkStream.cancelAllRequests(
           new AbortException("Worker was terminated.")
@@ -2384,11 +2448,7 @@ class WorkerTransport {
           }
 
           let fontRegistry = null;
-          if (
-            params.pdfBug &&
-            globalThis.FontInspector &&
-            globalThis.FontInspector.enabled
-          ) {
+          if (params.pdfBug && globalThis.FontInspector?.enabled) {
             fontRegistry = {
               registerFont(font, url) {
                 globalThis.FontInspector.fontAdded(font, url);
@@ -2447,11 +2507,7 @@ class WorkerTransport {
 
           // Heuristic that will allow us not to store large data.
           const MAX_IMAGE_SIZE_TO_STORE = 8000000;
-          if (
-            imageData &&
-            "data" in imageData &&
-            imageData.data.length > MAX_IMAGE_SIZE_TO_STORE
-          ) {
+          if (imageData?.data?.length > MAX_IMAGE_SIZE_TO_STORE) {
             pageProxy.cleanupAfterRender = true;
           }
           break;
@@ -2573,8 +2629,8 @@ class WorkerTransport {
     return this.messageHandler
       .sendWithPromise("SaveDocument", {
         numPages: this._numPages,
-        annotationStorage: annotationStorage?.getAll() || null,
-        filename: this._fullReader ? this._fullReader.filename : null,
+        annotationStorage: annotationStorage?.serializable || null,
+        filename: this._fullReader?.filename ?? null,
       })
       .finally(() => {
         if (annotationStorage) {
@@ -2585,6 +2641,13 @@ class WorkerTransport {
 
   getFieldObjects() {
     return this.messageHandler.sendWithPromise("GetFieldObjects", null);
+  }
+
+  hasJSActions() {
+    return (this._hasJSActionsPromise ||= this.messageHandler.sendWithPromise(
+      "HasJSActions",
+      null
+    ));
   }
 
   getCalculationOrderIds() {
@@ -2632,6 +2695,16 @@ class WorkerTransport {
     return this.messageHandler.sendWithPromise("GetJavaScript", null);
   }
 
+  getDocJSActions() {
+    return this.messageHandler.sendWithPromise("GetDocJSActions", null);
+  }
+
+  getPageJSActions(pageIndex) {
+    return this.messageHandler.sendWithPromise("GetPageJSActions", {
+      pageIndex,
+    });
+  }
+
   getOutline() {
     return this.messageHandler.sendWithPromise("GetOutline", null);
   }
@@ -2655,9 +2728,8 @@ class WorkerTransport {
         return {
           info: results[0],
           metadata: results[1] ? new Metadata(results[1]) : null,
-          contentDispositionFilename: this._fullReader
-            ? this._fullReader.filename
-            : null,
+          contentDispositionFilename: this._fullReader?.filename ?? null,
+          contentLength: this._fullReader?.contentLength ?? null,
         };
       });
   }
@@ -2686,6 +2758,7 @@ class WorkerTransport {
       }
       this.commonObjs.clear();
       this.fontLoader.clear();
+      this._hasJSActionsPromise = null;
     });
   }
 
@@ -2752,7 +2825,7 @@ class PDFObjects {
 
   has(objId) {
     const obj = this._objs[objId];
-    return obj ? obj.resolved : false;
+    return obj?.resolved || false;
   }
 
   /**
@@ -2848,6 +2921,7 @@ const InternalRenderTask = (function InternalRenderTaskClosure() {
       this.capability = createPromiseCapability();
       this.task = new RenderTask(this);
       // caching this-bound methods
+      this._cancelBound = this.cancel.bind(this);
       this._continueBound = this._continue.bind(this);
       this._scheduleNextBound = this._scheduleNext.bind(this);
       this._nextBound = this._next.bind(this);
@@ -2876,11 +2950,7 @@ const InternalRenderTask = (function InternalRenderTaskClosure() {
         canvasInRendering.add(this._canvas);
       }
 
-      if (
-        this._pdfBug &&
-        globalThis.StepperManager &&
-        globalThis.StepperManager.enabled
-      ) {
+      if (this._pdfBug && globalThis.StepperManager?.enabled) {
         this.stepper = globalThis.StepperManager.create(this._pageIndex);
         this.stepper.init(this.operatorList);
         this.stepper.nextBreakPoint = this.stepper.getNextBreakPoint();
@@ -2966,10 +3036,10 @@ const InternalRenderTask = (function InternalRenderTaskClosure() {
     _scheduleNext() {
       if (this._useRequestAnimationFrame) {
         window.requestAnimationFrame(() => {
-          this._nextBound().catch(this.cancel.bind(this));
+          this._nextBound().catch(this._cancelBound);
         });
       } else {
-        Promise.resolve().then(this._nextBound).catch(this.cancel.bind(this));
+        Promise.resolve().then(this._nextBound).catch(this._cancelBound);
       }
     }
 
@@ -3006,13 +3076,15 @@ const build =
   typeof PDFJSDev !== "undefined" ? PDFJSDev.eval("BUNDLE_BUILD") : null;
 
 export {
+  build,
+  DefaultCanvasFactory,
+  DefaultCMapReaderFactory,
   getDocument,
   LoopbackPort,
   PDFDataRangeTransport,
-  PDFWorker,
   PDFDocumentProxy,
   PDFPageProxy,
+  PDFWorker,
   setPDFNetworkStreamFactory,
   version,
-  build,
 };

@@ -95,6 +95,11 @@ class IPDFLinkService {
    * @param {number} pageNumber
    */
   isPageVisible(pageNumber) {}
+
+  /**
+   * @param {number} pageNumber
+   */
+  isPageCached(pageNumber) {}
 }
 
 /**
@@ -181,6 +186,9 @@ class IPDFAnnotationLayerFactory {
    *   for annotation icons. Include trailing slash.
    * @param {boolean} renderInteractiveForms
    * @param {IL10n} l10n
+   * @param {boolean} [enableScripting]
+   * @param {Promise<boolean>} [hasJSActionsPromise]
+   * @param {Object} [mouseState]
    * @returns {AnnotationLayerBuilder}
    */
   createAnnotationLayerBuilder(
@@ -189,7 +197,10 @@ class IPDFAnnotationLayerFactory {
     annotationStorage = null,
     imageResourcesPath = "",
     renderInteractiveForms = true,
-    l10n = undefined
+    l10n = undefined,
+    enableScripting = false,
+    hasJSActionsPromise = null,
+    mouseState = null
   ) {}
 }
 
@@ -227,10 +238,10 @@ class IL10n {
 }
 
 export {
-  IPDFLinkService,
-  IPDFHistory,
-  IRenderableView,
-  IPDFTextLayerFactory,
-  IPDFAnnotationLayerFactory,
   IL10n,
+  IPDFAnnotationLayerFactory,
+  IPDFHistory,
+  IPDFLinkService,
+  IPDFTextLayerFactory,
+  IRenderableView,
 };

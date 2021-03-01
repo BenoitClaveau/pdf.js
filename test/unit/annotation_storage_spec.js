@@ -16,15 +16,23 @@
 import { AnnotationStorage } from "../../src/display/annotation_storage.js";
 
 describe("AnnotationStorage", function () {
-  describe("GetOrCreateValue", function () {
+  describe("GetOrDefaultValue", function () {
     it("should get and set a new value in the annotation storage", function (done) {
       const annotationStorage = new AnnotationStorage();
-      let value = annotationStorage.getOrCreateValue("123A", "hello world");
+      let value = annotationStorage.getValue("123A", {
+        value: "hello world",
+      }).value;
       expect(value).toEqual("hello world");
+
+      annotationStorage.setValue("123A", {
+        value: "hello world",
+      });
 
       // the second argument is the default value to use
       // if the key isn't in the storage
-      value = annotationStorage.getOrCreateValue("123A", "an other string");
+      value = annotationStorage.getValue("123A", {
+        value: "an other string",
+      }).value;
       expect(value).toEqual("hello world");
       done();
     });
@@ -33,8 +41,8 @@ describe("AnnotationStorage", function () {
   describe("SetValue", function () {
     it("should set a new value in the annotation storage", function (done) {
       const annotationStorage = new AnnotationStorage();
-      annotationStorage.setValue("123A", "an other string");
-      const value = annotationStorage.getAll()["123A"];
+      annotationStorage.setValue("123A", { value: "an other string" });
+      const value = annotationStorage.getAll()["123A"].value;
       expect(value).toEqual("an other string");
       done();
     });
@@ -46,16 +54,18 @@ describe("AnnotationStorage", function () {
         called = true;
       };
       annotationStorage.onSetModified = callback;
-      annotationStorage.getOrCreateValue("asdf", "original");
-      expect(called).toBe(false);
 
-      // not changing value
-      annotationStorage.setValue("asdf", "original");
-      expect(called).toBe(false);
+      annotationStorage.setValue("asdf", { value: "original" });
+      expect(called).toBe(true);
 
       // changing value
-      annotationStorage.setValue("asdf", "modified");
+      annotationStorage.setValue("asdf", { value: "modified" });
       expect(called).toBe(true);
+
+      // not changing value
+      called = false;
+      annotationStorage.setValue("asdf", { value: "modified" });
+      expect(called).toBe(false);
       done();
     });
   });
@@ -68,15 +78,18 @@ describe("AnnotationStorage", function () {
         called = true;
       };
       annotationStorage.onResetModified = callback;
-      annotationStorage.getOrCreateValue("asdf", "original");
+      annotationStorage.setValue("asdf", { value: "original" });
+      annotationStorage.resetModified();
+      expect(called).toBe(true);
+      called = false;
 
       // not changing value
-      annotationStorage.setValue("asdf", "original");
+      annotationStorage.setValue("asdf", { value: "original" });
       annotationStorage.resetModified();
       expect(called).toBe(false);
 
       // changing value
-      annotationStorage.setValue("asdf", "modified");
+      annotationStorage.setValue("asdf", { value: "modified" });
       annotationStorage.resetModified();
       expect(called).toBe(true);
       done();

@@ -401,15 +401,11 @@ class PDFLinkService {
         break;
 
       case "NextPage":
-        if (this.page < this.pagesCount) {
-          this.page++;
-        }
+        this.pdfViewer.nextPage();
         break;
 
       case "PrevPage":
-        if (this.page > 1) {
-          this.page--;
-        }
+        this.pdfViewer.previousPage();
         break;
 
       case "LastPage":
@@ -449,7 +445,7 @@ class PDFLinkService {
   _cachedPageNumber(pageRef) {
     const refStr =
       pageRef.gen === 0 ? `${pageRef.num}R` : `${pageRef.num}R${pageRef.gen}`;
-    return (this._pagesRefCache && this._pagesRefCache[refStr]) || null;
+    return this._pagesRefCache?.[refStr] || null;
   }
 
   /**
@@ -457,6 +453,13 @@ class PDFLinkService {
    */
   isPageVisible(pageNumber) {
     return this.pdfViewer.isPageVisible(pageNumber);
+  }
+
+  /**
+   * @param {number} pageNumber
+   */
+  isPageCached(pageNumber) {
+    return this.pdfViewer.isPageCached(pageNumber);
   }
 }
 
@@ -607,6 +610,13 @@ class SimpleLinkService {
    * @param {number} pageNumber
    */
   isPageVisible(pageNumber) {
+    return true;
+  }
+
+  /**
+   * @param {number} pageNumber
+   */
+  isPageCached(pageNumber) {
     return true;
   }
 }
